@@ -1,0 +1,46 @@
+# hackton.-tetr
+
+Voice-commerce prototype with:
+
+- MercadoLibre products loaded from `products.json`
+- Fast dynamic product cards
+- Voice product search
+- Floating genie assistant states:
+  - `4.png`: initial state before the user clicks
+  - `1.png`: listening after the user clicks the genie
+  - `2.png`: thinking
+  - `3.png`: ideal product found
+- Cart chat for asking about products added to the cart
+
+## ElevenLabs
+
+1. Create an agent in ElevenLabs.
+2. Keep the widget public if you want to use the simple embed.
+3. Replace `REEMPLAZA_CON_TU_AGENT_ID` in `index.html` with your real `agent-id`.
+4. Add these Client Tools to the ElevenLabs agent:
+   - `searchProducts`
+     - `query`: required string
+     - `category`: optional string
+   - `showAllProducts`
+   - `getCart`
+   - `askCart`
+     - `question`: required string
+5. Enable "Wait for response" on tools that need product or cart data.
+
+## Run locally
+
+```powershell
+python -m http.server 5173
+```
+
+Open `http://localhost:5173`.
+
+## Import MercadoLibre Offers
+
+The importer reads a saved MercadoLibre offers HTML file and writes `products.json`:
+
+```powershell
+node tools/import-mercadolibre-offers.js data/mercadolibre-offers.html products.json
+```
+
+The current catalog was generated from MercadoLibre Colombia offers.

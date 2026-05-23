@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" role="img" aria-label="Genie assistant ready">
+  <rect width="180" height="180" rx="38" fill="#e7f0ff"/>
+  <path d="M88 45c28 0 51 22 51 50 0 20-12 37-29 45 8 8 17 12 28 12-24 13-50 2-63-10-22-5-38-24-38-47 0-28 23-50 51-50Z" fill="#2463eb"/>
+  <path d="M62 67c9-18 38-25 57-8-12 4-21 5-34 3-9-1-16 1-23 5Z" fill="#f59e0b"/>
+  <circle cx="72" cy="91" r="7" fill="#fff"/>
+  <circle cx="106" cy="91" r="7" fill="#fff"/>
+  <path d="M73 113c11 10 29 10 40 0" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round"/>
+  <path d="M55 143c28 12 62 12 90 0" fill="none" stroke="#0f766e" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="130" cy="55" r="10" fill="#f59e0b"/>
+</svg>

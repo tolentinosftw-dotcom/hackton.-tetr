@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VozMarket</title>
+    <link rel="preconnect" href="https://images.unsplash.com" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="VozMarket home">
+        <span class="brand-mark">V</span>
+        <span>VozMarket</span>
+      </a>
+
+      <form class="search" id="search-form" role="search">
+        <input
+          id="search-input"
+          type="search"
+          autocomplete="off"
+          placeholder="Search products"
+          aria-label="Search products"
+        />
+        <button class="icon-button" type="submit" aria-label="Search">
+          <span aria-hidden="true">Go</span>
+        </button>
+      </form>
+
+      <button class="cart-button" type="button" aria-label="View cart">
+        <span aria-hidden="true">Cart</span>
+        <span id="cart-count">0</span>
+      </button>
+    </header>
+
+    <main>
+      <section class="catalog-shell" aria-labelledby="catalog-title">
+        <div class="catalog-heading">
+          <div>
+            <p class="eyebrow">Voice commerce</p>
+            <h2 id="catalog-title">Products</h2>
+          </div>
+          <div class="catalog-actions">
+            <p id="result-summary">Loading products...</p>
+            <button id="voice-demo-button" class="primary-button" type="button">
+              Try voice
+            </button>
+            <button id="clear-button" class="secondary-button" type="button">
+              Show all
+            </button>
+          </div>
+        </div>
+
+        <div class="category-tabs" id="category-tabs" aria-label="Categories"></div>
+        <div class="product-grid" id="product-grid" aria-live="polite"></div>
+      </section>
+
+      <section class="chat-shell" aria-labelledby="chat-title">
+        <div class="chat-panel">
+          <div class="chat-heading">
+            <div>
+              <p class="eyebrow">Cart AI</p>
+              <h2 id="chat-title">Ask about your cart</h2>
+            </div>
+            <span id="cart-total">$0.00</span>
+          </div>
+
+          <div class="chat-messages" id="chat-messages" aria-live="polite">
+            <div class="chat-bubble ai">
+              Add products to your cart, then ask me things like "what is in my cart?" or
+              "which item is best for work?".
+            </div>
+          </div>
+
+          <form class="chat-form" id="chat-form">
+            <input
+              id="chat-input"
+              type="text"
+              autocomplete="off"
+              placeholder="Ask about your cart"
+              aria-label="Ask about your cart"
+            />
+            <button class="primary-button" type="submit">Send</button>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <aside class="assistant-orb" id="assistant-orb" tabindex="0" aria-live="polite" role="button">
+      <img id="assistant-image" src="4.png" alt="Genie assistant ready" />
+      <div>
+        <strong id="assistant-state">Ready</strong>
+        <span id="assistant-message">Click the genie and ask for a product.</span>
+      </div>
+    </aside>
+
+    <elevenlabs-convai
+      id="elevenlabs-widget"
+      agent-id="REEMPLAZA_CON_TU_AGENT_ID"
+    ></elevenlabs-convai>
+    <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
+    <script src="app.js" type="module"></script>
+  </body>
+</html>
