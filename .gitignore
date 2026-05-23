@@ -1,5 +1,6 @@
 data/*.html
 data/*.txt
+.env
 amazon-page_files/
 node_modules/
 .DS_Store

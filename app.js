@@ -46,7 +46,8 @@ let cart = [];
 
 const money = new Intl.NumberFormat("en-US", {
   style: "currency",
-  currency: "USD",
+  currency: "COP",
+  maximumFractionDigits: 0,
 });
 
 function normalize(value) {
@@ -185,24 +186,59 @@ function renderCategories() {
   });
 }
 
-function runSearch(query, source = "manual") {
+async function getAiProductSearch(query) {
+  const response = await fetch("/api/product-search", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ query }),
+  });
+
+  if (!response.ok) throw new Error("AI search failed");
+  return response.json();
+}
+
+function orderProductsByIds(items, ids = []) {
+  const idOrder = new Map(ids.map((id, index) => [id, index]));
+  const matched = items
+    .filter((product) => idOrder.has(product.id))
+    .sort((a, b) => idOrder.get(a.id) - idOrder.get(b.id));
+  const rest = items.filter((product) => !idOrder.has(product.id));
+  return [...matched, ...rest];
+}
+
+async function runSearch(query, source = "manual") {
   activeQuery = query.trim();
   searchInput.value = activeQuery;
-  setAssistant("thinking", activeQuery ? `Searching: ${activeQuery}` : "Showing the full catalog.");
+  setAssistant("thinking", activeQuery ? `Buscando con IA: ${activeQuery}` : "Showing the full catalog.");
 
   const results = getFilteredProducts();
   renderProducts(results);
   const idealProduct = results[0];
 
-  const answer = activeQuery
+  let answer = activeQuery
     ? idealProduct
-      ? `The ideal product is ${idealProduct.name}: ${idealProduct.description}`
-      : `I could not find products for "${activeQuery}".`
+      ? `El producto ideal es ${idealProduct.name}.`
+      : `No encontre productos para "${activeQuery}".`
     : "Here are all products.";
 
+  let finalResults = results;
+
+  if (activeQuery) {
+    try {
+      const aiAnswer = await getAiProductSearch(activeQuery);
+      answer = aiAnswer.message || answer;
+      finalResults = orderProductsByIds(results.length ? results : products, aiAnswer.productIds || []);
+      renderProducts(finalResults);
+    } catch (error) {
+      answer = `${answer} No pude conectar con la IA, use la busqueda local.`;
+    }
+  }
+
   window.setTimeout(() => {
-    setAssistant(idealProduct ? "speaking" : "idle", answer);
-    if (source === "voice-demo") speak(answer);
+    setAssistant(finalResults.length ? "speaking" : "idle", answer);
+    if (activeQuery) speak(answer);
   }, 350);
 
   window.setTimeout(() => {
@@ -211,8 +247,8 @@ function runSearch(query, source = "manual") {
 
   return {
     query: activeQuery,
-    count: results.length,
-    results: results.slice(0, 5).map((product) => ({
+    count: finalResults.length,
+    results: finalResults.slice(0, 5).map((product) => ({
       id: product.id,
       name: product.name,
       category: product.category,
@@ -228,7 +264,7 @@ function speak(text) {
   if (!("speechSynthesis" in window)) return;
   speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = "en-US";
+  utterance.lang = "es-CO";
   speechSynthesis.speak(utterance);
 }
 
@@ -241,12 +277,12 @@ function startVoiceDemo() {
   }
 
   const recognition = new SpeechRecognition();
-  recognition.lang = "en-US";
+  recognition.lang = "es-CO";
   recognition.interimResults = false;
   recognition.maxAlternatives = 1;
 
   recognition.addEventListener("start", () => {
-    setAssistant("listening", "I am listening. Tell me what product you need.");
+    setAssistant("listening", "Te escucho. Dime que producto necesitas.");
   });
 
   recognition.addEventListener("result", (event) => {

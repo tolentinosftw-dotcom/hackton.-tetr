@@ -30,10 +30,24 @@ Voice-commerce prototype with:
 ## Run locally
 
 ```powershell
-python -m http.server 5173
+node server.js
 ```
 
 Open `http://localhost:5173`.
+
+Create a local `.env` file with one of these names:
+
+```text
+OPENAI_API_KEY=your_key_here
+```
+
+or:
+
+```text
+openKey=your_key_here
+```
+
+The key is read only by `server.js`; it is not exposed to the browser.
 
 ## Import MercadoLibre Offers
 
