@@ -147,7 +147,6 @@ function renderProducts(items) {
           ${product.category ? `<p class="eyebrow">${product.category}</p>` : ""}
           <h3>${product.name}</h3>
         </div>
-        <p>${product.description}</p>
         <div class="product-meta">
           <span class="price">${money.format(product.price)}</span>
           <span class="stock">${product.stock} in stock</span>
