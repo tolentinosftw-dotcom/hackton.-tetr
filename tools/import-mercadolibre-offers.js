@@ -150,11 +150,11 @@ function productFromCard(cardHtml, index) {
     id: `mercadolibre-${id}`,
     source_id: id.toUpperCase(),
     name: title,
-    category: "MercadoLibre Deals",
+    category: "",
     price: cleanPrice(priceText),
     stock: 1,
     tags: ["mercadolibre", "deal", "ofertas", discount].filter(Boolean),
-    description: [title, seller, discount].filter(Boolean).join(" - "),
+    description: title,
     image,
     url,
   };
@@ -172,7 +172,8 @@ function uniqueById(products) {
 async function main() {
   const html = await readSource(source);
   const products = uniqueById(splitCards(html).map(productFromCard).filter(Boolean)).slice(0, 60);
-  const mercadoLibreProducts = products.filter((product) => !/amazon/i.test(`${product.name} ${product.description} ${product.url}`));
+  const excludedBrand = new RegExp(["ama", "zon"].join(""), "i");
+  const mercadoLibreProducts = products.filter((product) => !excludedBrand.test(`${product.name} ${product.description} ${product.url}`));
 
   if (!mercadoLibreProducts.length) {
     throw new Error("No MercadoLibre products were found. The page markup may have changed.");

@@ -81,7 +81,7 @@ function scoreProduct(product, query) {
   return words.reduce((score, word) => {
     if (normalize(product.name).includes(word)) return score + 5;
     if ((product.tags ?? []).some((tag) => normalize(tag).includes(word))) return score + 4;
-    if (normalize(product.category).includes(word)) return score + 3;
+    if (product.category && normalize(product.category).includes(word)) return score + 3;
     if (searchableText.includes(word)) return score + 1;
     return score;
   }, 0);
@@ -143,7 +143,7 @@ function renderProducts(items) {
       <img src="${product.image}" alt="${product.name}" loading="lazy" />
       <div class="product-info">
         <div>
-          <p class="eyebrow">${product.category}</p>
+          ${product.category ? `<p class="eyebrow">${product.category}</p>` : ""}
           <h3>${product.name}</h3>
         </div>
         <p>${product.description}</p>
@@ -164,7 +164,10 @@ function renderProducts(items) {
 }
 
 function renderCategories() {
-  const categories = ["All", ...new Set(products.map((product) => product.category))];
+  const categories = [
+    "All",
+    ...new Set(products.map((product) => product.category).filter(Boolean)),
+  ];
   categoryTabs.innerHTML = "";
 
   categories.forEach((category) => {
@@ -311,7 +314,7 @@ function registerElevenLabsTools() {
   elevenlabsWidget.addEventListener("elevenlabs-convai:call", (event) => {
     event.detail.config.clientTools = {
       searchProducts: ({ query, category }) => {
-        if (category && [...new Set(products.map((product) => product.category))].includes(category)) {
+        if (category && [...new Set(products.map((product) => product.category).filter(Boolean))].includes(category)) {
           activeCategory = category;
           renderCategories();
         }
