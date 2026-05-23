@@ -49,6 +49,20 @@ openKey=your_key_here
 
 The key is read only by `server.js`; it is not exposed to the browser.
 
+For ElevenLabs speech, add:
+
+```text
+ELEVENLABS_API_KEY=your_elevenlabs_key_here
+ELEVENLABS_VOICE_ID=JBFqnCBsd6RMkjVDRZzb
+```
+
+The project also supports your current names:
+
+```text
+elevenlabs=your_elevenlabs_key_here
+ELEVENLABS_VOICE_I=JBFqnCBsd6RMkjVDRZzb
+```
+
 ## Import MercadoLibre Offers
 
 The importer reads a saved MercadoLibre offers HTML file and writes `products.json`:

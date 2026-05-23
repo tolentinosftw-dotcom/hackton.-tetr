@@ -259,12 +259,33 @@ async function runSearch(query, source = "manual") {
   };
 }
 
-function speak(text) {
+function speakWithBrowser(text) {
   if (!("speechSynthesis" in window)) return;
   speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = "es-CO";
   speechSynthesis.speak(utterance);
+}
+
+async function speak(text) {
+  try {
+    const response = await fetch("/api/tts", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ text }),
+    });
+
+    if (!response.ok) throw new Error("TTS failed");
+    const audioBlob = await response.blob();
+    const audioUrl = URL.createObjectURL(audioBlob);
+    const audio = new Audio(audioUrl);
+    audio.addEventListener("ended", () => URL.revokeObjectURL(audioUrl), { once: true });
+    await audio.play();
+  } catch (error) {
+    speakWithBrowser(text);
+  }
 }
 
 function startVoiceDemo() {

@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
 const { URL } = require("node:url");
+require("dotenv").config();
 
 const root = __dirname;
 const port = Number(process.env.PORT || 5173);
@@ -10,6 +11,12 @@ loadEnv(path.join(root, ".env"));
 
 const openAiKey = process.env.OPENAI_API_KEY || process.env.openKey || process.env.OPENAI_KEY;
 const openAiModel = process.env.OPENAI_MODEL || "gpt-5.4-mini";
+const elevenLabsKey =
+  process.env.ELEVENLABS_API_KEY || process.env.elevenlabs || process.env.ELEVENLABS_KEY;
+const elevenLabsVoiceId =
+  process.env.ELEVENLABS_VOICE_ID || process.env.ELEVENLABS_VOICE_I || "JBFqnCBsd6RMkjVDRZzb";
+const elevenLabsModelId = process.env.ELEVENLABS_MODEL_ID || "eleven_multilingual_v2";
+const elevenLabsOutputFormat = process.env.ELEVENLABS_OUTPUT_FORMAT || "mp3_44100_128";
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -167,6 +174,62 @@ function sendJson(response, status, data) {
   response.end(JSON.stringify(data));
 }
 
+async function streamToBuffer(audio) {
+  if (Buffer.isBuffer(audio)) return audio;
+  if (audio instanceof ArrayBuffer) return Buffer.from(audio);
+  if (audio instanceof Uint8Array) return Buffer.from(audio);
+
+  if (audio?.getReader) {
+    const reader = audio.getReader();
+    const chunks = [];
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(Buffer.from(value));
+    }
+    return Buffer.concat(chunks);
+  }
+
+  if (audio?.[Symbol.asyncIterator]) {
+    const chunks = [];
+    for await (const chunk of audio) {
+      chunks.push(Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+  }
+
+  if (audio?.arrayBuffer) return Buffer.from(await audio.arrayBuffer());
+  throw new Error("Unsupported ElevenLabs audio response");
+}
+
+async function synthesizeSpeech(text) {
+  if (!elevenLabsKey) {
+    throw new Error("Missing ELEVENLABS_API_KEY or elevenlabs in .env");
+  }
+
+  const { ElevenLabsClient } = await import("@elevenlabs/elevenlabs-js");
+  const elevenlabs = new ElevenLabsClient({
+    apiKey: elevenLabsKey,
+  });
+
+  const audio = await elevenlabs.textToSpeech.convert(elevenLabsVoiceId, {
+    text,
+    modelId: elevenLabsModelId,
+    outputFormat: elevenLabsOutputFormat,
+  });
+
+  return streamToBuffer(audio);
+}
+
+function sendAudio(response, buffer) {
+  response.writeHead(200, {
+    "Content-Type": "audio/mpeg",
+    "Content-Length": buffer.length,
+    "Cache-Control": "no-store",
+  });
+  response.end(buffer);
+}
+
 function readBody(request) {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -218,6 +281,19 @@ const server = http.createServer(async (request, response) => {
         message: answer.message || fallback.message,
         productIds: answer.productIds.length ? answer.productIds : fallback.productIds,
       });
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/api/tts") {
+      const body = JSON.parse(await readBody(request));
+      const text = String(body.text || "").trim().slice(0, 900);
+      if (!text) {
+        sendJson(response, 400, { message: "Text is required" });
+        return;
+      }
+
+      const audio = await synthesizeSpeech(text);
+      sendAudio(response, audio);
       return;
     }
 
