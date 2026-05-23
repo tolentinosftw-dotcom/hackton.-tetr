@@ -81,6 +81,14 @@ function getCandidateProducts(query, limit = 12) {
   return (scored.length ? scored : products).slice(0, limit);
 }
 
+function getAllProducts() {
+  return JSON.parse(fs.readFileSync(path.join(root, "products.json"), "utf8"));
+}
+
+function getProductById(id) {
+  return getAllProducts().find((product) => product.id === id);
+}
+
 function localAnswer(query, candidates) {
   const ideal = candidates[0];
   if (!ideal) {
@@ -348,6 +356,17 @@ function serveStatic(request, response) {
 
 const server = http.createServer(async (request, response) => {
   try {
+    if (request.method === "GET" && request.url.startsWith("/api/products/")) {
+      const id = decodeURIComponent(request.url.replace("/api/products/", ""));
+      const product = getProductById(id);
+      if (!product) {
+        sendJson(response, 404, { message: "Product not found" });
+        return;
+      }
+      sendJson(response, 200, product);
+      return;
+    }
+
     if (request.method === "POST" && request.url === "/api/product-search") {
       const body = JSON.parse(await readBody(request));
       const query = String(body.query || "").trim();

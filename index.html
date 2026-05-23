@@ -94,6 +94,26 @@
       </div>
     </aside>
 
+    <section class="assistant-stage" id="assistant-stage" aria-hidden="true">
+      <button class="stage-close" id="stage-close" type="button" aria-label="Close assistant">Close</button>
+      <div class="stage-core">
+        <div class="stage-genie-wrap">
+          <span class="voice-ring ring-one"></span>
+          <span class="voice-ring ring-two"></span>
+          <span class="voice-ring ring-three"></span>
+          <img id="stage-genie-image" src="4.png" alt="Genie assistant" />
+        </div>
+        <p class="stage-label" id="stage-label">Ready</p>
+        <h2 id="stage-message">Click the genie and tell me what you are shopping for.</h2>
+        <p id="stage-transcript">I can search, compare, ask for your address, and open WhatsApp when you confirm the purchase.</p>
+      </div>
+    </section>
+
+    <dialog class="product-dialog" id="product-dialog">
+      <button class="dialog-close" id="dialog-close" type="button" aria-label="Close product">Close</button>
+      <div id="product-detail"></div>
+    </dialog>
+
     <elevenlabs-convai
       id="elevenlabs-widget"
       agent-id="REEMPLAZA_CON_TU_AGENT_ID"

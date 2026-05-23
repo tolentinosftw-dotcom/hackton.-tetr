@@ -11,6 +11,8 @@ Voice-commerce prototype with:
   - `2.png`: thinking
   - `3.png`: ideal product found
 - Cart chat for asking about products added to the cart
+- Full-screen animated genie conversation mode
+- Product detail cards and a WhatsApp checkout flow
 
 ## ElevenLabs
 
@@ -34,6 +36,15 @@ node server.js
 ```
 
 Open `http://localhost:5173`.
+
+## Voice Purchase Flow
+
+1. Click the genie.
+2. Ask for a product in English.
+3. The assistant recommends one product, focuses its card, and opens the product detail.
+4. Say or type `yes` to buy.
+5. The assistant asks for the delivery address.
+6. After the address, WhatsApp opens with a message for `310 8853158` containing the product, price, and address.
 
 Create a local `.env` file with one of these names:
 
