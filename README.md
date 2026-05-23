@@ -49,7 +49,7 @@ openKey=your_key_here
 
 The key is read only by `server.js`; it is not exposed to the browser.
 
-For ElevenLabs speech, add:
+For English ElevenLabs speech, add:
 
 ```text
 ELEVENLABS_API_KEY=your_elevenlabs_key_here

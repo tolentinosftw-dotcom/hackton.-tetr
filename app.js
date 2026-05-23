@@ -43,6 +43,7 @@ let products = [];
 let activeCategory = "All";
 let activeQuery = "";
 let cart = [];
+let conversationHistory = [];
 
 const money = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -191,10 +192,30 @@ async function getAiProductSearch(query) {
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({
+      query,
+      history: conversationHistory.slice(-8),
+    }),
   });
 
   if (!response.ok) throw new Error("AI search failed");
+  return response.json();
+}
+
+async function getAiShoppingReply(message) {
+  const response = await fetch("/api/shop-chat", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      message,
+      cart: getCartSummary().items,
+      history: conversationHistory.slice(-8),
+    }),
+  });
+
+  if (!response.ok) throw new Error("AI chat failed");
   return response.json();
 }
 
@@ -210,7 +231,7 @@ function orderProductsByIds(items, ids = []) {
 async function runSearch(query, source = "manual") {
   activeQuery = query.trim();
   searchInput.value = activeQuery;
-  setAssistant("thinking", activeQuery ? `Buscando con IA: ${activeQuery}` : "Showing the full catalog.");
+  setAssistant("thinking", activeQuery ? `Thinking about: ${activeQuery}` : "Showing the full catalog.");
 
   const results = getFilteredProducts();
   renderProducts(results);
@@ -218,8 +239,8 @@ async function runSearch(query, source = "manual") {
 
   let answer = activeQuery
     ? idealProduct
-      ? `El producto ideal es ${idealProduct.name}.`
-      : `No encontre productos para "${activeQuery}".`
+      ? `I found a good option: ${idealProduct.name}.`
+      : `I could not find products for "${activeQuery}".`
     : "Here are all products.";
 
   let finalResults = results;
@@ -230,8 +251,11 @@ async function runSearch(query, source = "manual") {
       answer = aiAnswer.message || answer;
       finalResults = orderProductsByIds(results.length ? results : products, aiAnswer.productIds || []);
       renderProducts(finalResults);
+      conversationHistory.push({ role: "user", content: activeQuery });
+      conversationHistory.push({ role: "assistant", content: answer });
+      conversationHistory = conversationHistory.slice(-10);
     } catch (error) {
-      answer = `${answer} No pude conectar con la IA, use la busqueda local.`;
+      answer = `${answer} I could not connect to the AI, so I used local search.`;
     }
   }
 
@@ -241,7 +265,7 @@ async function runSearch(query, source = "manual") {
   }, 350);
 
   window.setTimeout(() => {
-    setAssistant("idle", "Click the genie and ask for another product.");
+    setAssistant("idle", "Click the genie and tell me what you are shopping for.");
   }, 3600);
 
   return {
@@ -263,7 +287,7 @@ function speakWithBrowser(text) {
   if (!("speechSynthesis" in window)) return;
   speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = "es-CO";
+  utterance.lang = "en-US";
   speechSynthesis.speak(utterance);
 }
 
@@ -297,12 +321,12 @@ function startVoiceDemo() {
   }
 
   const recognition = new SpeechRecognition();
-  recognition.lang = "es-CO";
+  recognition.lang = "en-US";
   recognition.interimResults = false;
   recognition.maxAlternatives = 1;
 
   recognition.addEventListener("start", () => {
-    setAssistant("listening", "Te escucho. Dime que producto necesitas.");
+    setAssistant("listening", "I am listening. What are you shopping for today?");
   });
 
   recognition.addEventListener("result", (event) => {
@@ -391,7 +415,7 @@ async function loadProducts() {
     renderCategories();
     renderProducts(products);
     updateCartUi();
-    setAssistant("idle", "Click the genie and ask for a product.");
+    setAssistant("idle", "Click the genie and tell me what you are shopping for.");
   } catch (error) {
     resultSummary.textContent = "Catalog load error";
     productGrid.innerHTML = '<div class="empty-state">products.json could not be loaded.</div>';
@@ -418,19 +442,33 @@ assistantOrb.addEventListener("keydown", (event) => {
   startVoiceDemo();
 });
 
-chatForm.addEventListener("submit", (event) => {
+chatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const question = chatInput.value.trim();
   if (!question) return;
 
   addChatMessage("user", question);
   chatInput.value = "";
-  setAssistant("thinking", "Checking your cart.");
+  setAssistant("thinking", "Thinking about your shopping needs.");
 
-  const answer = answerCartQuestion(question).message;
+  let answer = answerCartQuestion(question).message;
+  try {
+    const aiAnswer = await getAiShoppingReply(question);
+    answer = aiAnswer.message || answer;
+    const recommendedProducts = orderProductsByIds(products, aiAnswer.productIds || []).slice(0, 12);
+    if (recommendedProducts.length) renderProducts(recommendedProducts);
+  } catch (error) {
+    answer = `${answer} I could not reach the shopping assistant, so I used cart basics.`;
+  }
+
+  conversationHistory.push({ role: "user", content: question });
+  conversationHistory.push({ role: "assistant", content: answer });
+  conversationHistory = conversationHistory.slice(-10);
+
   window.setTimeout(() => {
     addChatMessage("ai", answer);
     setAssistant("speaking", answer);
+    speak(answer);
   }, 300);
 });
 

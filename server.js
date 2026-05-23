@@ -85,13 +85,13 @@ function localAnswer(query, candidates) {
   const ideal = candidates[0];
   if (!ideal) {
     return {
-      message: `No encontre productos para "${query}".`,
+      message: `I could not find an exact match for "${query}". What kind of product are you interested in today?`,
       productIds: [],
     };
   }
 
   return {
-    message: `El producto ideal es ${ideal.name}. Su precio es ${formatCop(ideal.price)}.`,
+    message: `I found a good option: ${ideal.name}. It is ${formatCop(ideal.price)}. Would you like me to compare it with another option?`,
     productIds: candidates.slice(0, 8).map((product) => product.id),
   };
 }
@@ -104,7 +104,7 @@ function formatCop(value) {
   }).format(value || 0);
 }
 
-async function askOpenAi(query, candidates) {
+async function askOpenAi(query, candidates, history = []) {
   if (!openAiKey) return localAnswer(query, candidates);
 
   const compactProducts = candidates.map((product) => ({
@@ -127,16 +127,18 @@ async function askOpenAi(query, candidates) {
         {
           role: "system",
           content:
-            "Eres un asistente de e-commerce por voz. Debes elegir productos solo del JSON entregado. Responde en espanol claro, corto y util. Devuelve exclusivamente JSON valido.",
+            "You are a warm English-speaking voice shopping assistant for an e-commerce site. Your job is not only to search, but to guide the buying journey: greet the customer, ask what they are shopping for, clarify budget/features/use case when needed, recommend from the provided product JSON only, explain briefly, and suggest the next helpful step. Keep spoken replies natural and concise, usually 1-3 short sentences. Return only valid JSON.",
         },
         {
           role: "user",
           content: JSON.stringify({
+            conversation_history: history.slice(-8),
             customer_request: query,
             products: compactProducts,
             expected_json_shape: {
-              message: "short spoken answer",
-              productIds: ["best product id first"],
+              message: "short spoken English answer for the customer",
+              productIds: ["recommended product id first; can be empty if asking a clarifying question"],
+              intent: "greeting | clarify | recommend | compare | cart_help | checkout_help",
             },
           }),
         },
@@ -166,6 +168,86 @@ async function askOpenAi(query, candidates) {
   return {
     message: parsed.message || localAnswer(query, candidates).message,
     productIds: Array.isArray(parsed.productIds) ? parsed.productIds : [],
+    intent: parsed.intent || "recommend",
+  };
+}
+
+async function askShoppingAssistant(message, cart = [], history = []) {
+  const query = `${message} ${cart.map((product) => product.name).join(" ")}`.trim();
+  const candidates = getCandidateProducts(query || message, 10);
+
+  if (!openAiKey) {
+    return {
+      message:
+        cart.length > 0
+          ? `You have ${cart.length} item${cart.length === 1 ? "" : "s"} in your cart. Would you like me to compare them or help you choose one?`
+          : "What are you shopping for today? I can help you compare options, prices, and features.",
+      productIds: [],
+      intent: "cart_help",
+    };
+  }
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${openAiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: openAiModel,
+      input: [
+        {
+          role: "system",
+          content:
+            "You are a friendly English-speaking personal shopping assistant. Help the user through the full purchase process: understand needs, ask clarifying questions, compare products, explain tradeoffs, help with cart decisions, and suggest next steps. Use only the provided product and cart data. Keep answers natural and concise for voice. Return only valid JSON.",
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            conversation_history: history.slice(-8),
+            customer_message: message,
+            cart,
+            candidate_products: candidates.map((product) => ({
+              id: product.id,
+              name: product.name,
+              price: product.price,
+              description: product.description,
+              tags: product.tags,
+            })),
+            expected_json_shape: {
+              message: "short spoken English answer",
+              productIds: ["optional suggested product ids"],
+              intent: "greeting | clarify | recommend | compare | cart_help | checkout_help",
+            },
+          }),
+        },
+      ],
+      text: {
+        format: {
+          type: "json_object",
+        },
+      },
+    }),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error?.message || "OpenAI chat request failed");
+  }
+
+  const outputText =
+    data.output_text ||
+    data.output
+      ?.flatMap((item) => item.content || [])
+      .map((content) => content.text)
+      .filter(Boolean)
+      .join("\n");
+
+  const parsed = JSON.parse(outputText || "{}");
+  return {
+    message: parsed.message || "What are you shopping for today?",
+    productIds: Array.isArray(parsed.productIds) ? parsed.productIds : [],
+    intent: parsed.intent || "cart_help",
   };
 }
 
@@ -269,17 +351,19 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "POST" && request.url === "/api/product-search") {
       const body = JSON.parse(await readBody(request));
       const query = String(body.query || "").trim();
+      const history = Array.isArray(body.history) ? body.history : [];
       if (!query) {
         sendJson(response, 400, { message: "Query is required", productIds: [] });
         return;
       }
 
       const candidates = getCandidateProducts(query);
-      const answer = await askOpenAi(query, candidates);
+      const answer = await askOpenAi(query, candidates, history);
       const fallback = localAnswer(query, candidates);
       sendJson(response, 200, {
         message: answer.message || fallback.message,
         productIds: answer.productIds.length ? answer.productIds : fallback.productIds,
+        intent: answer.intent || "recommend",
       });
       return;
     }
@@ -294,6 +378,21 @@ const server = http.createServer(async (request, response) => {
 
       const audio = await synthesizeSpeech(text);
       sendAudio(response, audio);
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/api/shop-chat") {
+      const body = JSON.parse(await readBody(request));
+      const message = String(body.message || "").trim();
+      const cart = Array.isArray(body.cart) ? body.cart : [];
+      const history = Array.isArray(body.history) ? body.history : [];
+      if (!message) {
+        sendJson(response, 400, { message: "Message is required", productIds: [] });
+        return;
+      }
+
+      const answer = await askShoppingAssistant(message, cart, history);
+      sendJson(response, 200, answer);
       return;
     }
 
