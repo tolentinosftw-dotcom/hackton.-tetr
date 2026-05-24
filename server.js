@@ -11,6 +11,7 @@ loadEnv(path.join(root, ".env"));
 
 const openAiKey = process.env.OPENAI_API_KEY || process.env.openKey || process.env.OPENAI_KEY;
 const openAiModel = process.env.OPENAI_MODEL || "gpt-5.4-mini";
+const openAiTranscribeModel = process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
 const elevenLabsKey =
   process.env.ELEVENLABS_API_KEY || process.env.elevenlabs || process.env.ELEVENLABS_KEY;
 const elevenLabsVoiceId =
@@ -332,6 +333,42 @@ async function synthesizeSpeech(text) {
   return streamToBuffer(audio);
 }
 
+async function transcribeAudioBuffer(buffer, mimeType = "audio/webm") {
+  if (!openAiKey) {
+    console.error("[server] OpenAI key missing for transcription");
+    throw new Error("Missing OPENAI_API_KEY or openKey in .env");
+  }
+
+  console.log(`[server] OpenAI transcription start model=${openAiTranscribeModel} bytes=${buffer.length}`);
+  const extension = mimeType.includes("mp4")
+    ? "mp4"
+    : mimeType.includes("mpeg")
+      ? "mp3"
+      : mimeType.includes("ogg")
+        ? "ogg"
+        : "webm";
+  const form = new FormData();
+  form.append("model", openAiTranscribeModel);
+  form.append("file", new Blob([buffer], { type: mimeType }), `voice.${extension}`);
+
+  const openAiResponse = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${openAiKey}`,
+    },
+    body: form,
+  });
+
+  const data = await openAiResponse.json();
+  console.log(`[server] OpenAI transcription response status=${openAiResponse.status} ok=${openAiResponse.ok}`);
+  if (!openAiResponse.ok) {
+    console.error("[server] OpenAI transcription error body", data);
+    throw new Error(data.error?.message || "OpenAI transcription failed");
+  }
+
+  return String(data.text || "").trim();
+}
+
 function sendAudio(response, buffer) {
   response.writeHead(200, {
     "Content-Type": "audio/mpeg",
@@ -352,6 +389,24 @@ function readBody(request) {
       }
     });
     request.on("end", () => resolve(body));
+    request.on("error", reject);
+  });
+}
+
+function readBinaryBody(request) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let total = 0;
+    request.on("data", (chunk) => {
+      total += chunk.length;
+      if (total > 10_000_000) {
+        reject(new Error("Audio request too large"));
+        request.destroy();
+        return;
+      }
+      chunks.push(Buffer.from(chunk));
+    });
+    request.on("end", () => resolve(Buffer.concat(chunks)));
     request.on("error", reject);
   });
 }
@@ -448,6 +503,20 @@ const server = http.createServer(async (request, response) => {
       const audio = await synthesizeSpeech(text);
       console.log(`[server] tts ok bytes=${audio.length}`);
       sendAudio(response, audio);
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/api/transcribe") {
+      const audio = await readBinaryBody(request);
+      const mimeType = request.headers["content-type"] || "audio/webm";
+      console.log(`[server] transcribe request bytes=${audio.length} type=${mimeType}`);
+      if (!audio.length) {
+        sendJson(response, 400, { message: "Audio is required", text: "" });
+        return;
+      }
+
+      const text = await transcribeAudioBuffer(audio, mimeType);
+      sendJson(response, 200, { text });
       return;
     }
 

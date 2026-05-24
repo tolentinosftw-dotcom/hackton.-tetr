@@ -67,6 +67,9 @@ let currentAudioUrl = null;
 let lastSpokenText = "";
 let assistantStateTimeout = null;
 let currentAssistantState = "idle";
+let activeMediaRecorder = null;
+let activeMediaStream = null;
+let activeRecordingTimer = null;
 
 const whatsappNumber = "573108853158";
 
@@ -815,7 +818,140 @@ async function startVoiceDemo() {
   console.log("[voice] listening requested");
   openAssistantStage("Listening...");
   setAssistantState("listening", "Starting microphone...");
-  beginVoiceRecognition();
+  startRecordedVoiceInput();
+}
+
+function getSupportedAudioMimeType() {
+  const types = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "audio/ogg",
+    "audio/mp4",
+  ];
+
+  return types.find((type) => window.MediaRecorder?.isTypeSupported?.(type)) || "";
+}
+
+function stopActiveRecording() {
+  if (activeRecordingTimer) {
+    window.clearTimeout(activeRecordingTimer);
+    activeRecordingTimer = null;
+  }
+
+  if (activeMediaRecorder && activeMediaRecorder.state !== "inactive") {
+    activeMediaRecorder.stop();
+  }
+}
+
+function cleanupRecording() {
+  if (activeRecordingTimer) {
+    window.clearTimeout(activeRecordingTimer);
+    activeRecordingTimer = null;
+  }
+  if (activeMediaStream) {
+    activeMediaStream.getTracks().forEach((track) => track.stop());
+    activeMediaStream = null;
+  }
+  activeMediaRecorder = null;
+}
+
+async function transcribeAudioBlob(blob) {
+  console.log("[voice] transcription request started", { size: blob.size, type: blob.type });
+  const response = await fetch("/api/transcribe", {
+    method: "POST",
+    headers: {
+      "Content-Type": blob.type || "audio/webm",
+    },
+    body: blob,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("[error] transcription failed", response.status, errorText);
+    throw new Error(`Transcription failed with ${response.status}`);
+  }
+
+  const data = await response.json();
+  const transcript = String(data.text || "").trim();
+  console.log("[voice] transcript received", { transcript });
+  return transcript;
+}
+
+async function startRecordedVoiceInput() {
+  if (activeMediaRecorder && activeMediaRecorder.state === "recording") {
+    console.log("[voice] manual recording stop");
+    stopActiveRecording();
+    return;
+  }
+
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+    console.warn("[voice] MediaRecorder unavailable, falling back to SpeechRecognition");
+    beginVoiceRecognition();
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeType = getSupportedAudioMimeType();
+    const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    const chunks = [];
+    activeMediaStream = stream;
+    activeMediaRecorder = recorder;
+
+    recorder.addEventListener("dataavailable", (event) => {
+      if (event.data?.size) chunks.push(event.data);
+    });
+
+    recorder.addEventListener("start", () => {
+      console.log("[voice] listening started");
+      setAssistantState("listening", "Listening...");
+      stageTranscript.textContent = "Listening... speak now.";
+      activeRecordingTimer = window.setTimeout(() => {
+        console.log("[voice] auto recording stop");
+        stopActiveRecording();
+      }, 6500);
+    });
+
+    recorder.addEventListener("stop", async () => {
+      try {
+        cleanupRecording();
+        if (!chunks.length) {
+          await handleVoiceRecognitionFailure("I didn't catch that. Please try again.");
+          return;
+        }
+
+        setAssistantState("thinking", "Thinking...");
+        stageTranscript.textContent = "Processing your voice...";
+        const audioBlob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+        const transcript = await withResponseTimeout(transcribeAudioBlob(audioBlob), "Voice transcription");
+        if (!transcript) {
+          await handleVoiceRecognitionFailure("I didn't catch that. Please try again.");
+          return;
+        }
+
+        stageTranscript.textContent = transcript;
+        await handleCommerceConversation(transcript, "voice-demo");
+      } catch (error) {
+        console.error("[error] recorded voice flow failed", error);
+        await handleVoiceRecognitionFailure("I couldn't understand the audio. Please try again or type your request.");
+      }
+    });
+
+    recorder.addEventListener("error", async (event) => {
+      console.error("[error] media recorder error", event.error || event);
+      cleanupRecording();
+      await handleVoiceRecognitionFailure("I couldn't record your voice. Please try again or type your request.");
+    });
+
+    recorder.start();
+  } catch (error) {
+    console.error("[error] microphone recording start failed", error);
+    await handleVoiceRecognitionFailure(
+      "Microphone permission is blocked. Please allow microphone access or type your request.",
+      "Microphone permission is blocked. Please type your request."
+    );
+  }
 }
 
 async function handleVoiceRecognitionFailure(message, spokenText = message) {

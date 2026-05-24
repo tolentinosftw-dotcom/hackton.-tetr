@@ -5,6 +5,7 @@ require("dotenv").config();
 const root = path.join(__dirname, "..");
 const openAiKey = process.env.OPENAI_API_KEY || process.env.openKey || process.env.OPENAI_KEY;
 const openAiModel = process.env.OPENAI_MODEL || "gpt-5.4-mini";
+const openAiTranscribeModel = process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
 const elevenLabsKey =
   process.env.ELEVENLABS_API_KEY || process.env.elevenlabs || process.env.ELEVENLABS_KEY;
 const elevenLabsVoiceId =
@@ -290,6 +291,42 @@ async function synthesizeSpeech(text) {
   return streamToBuffer(audio);
 }
 
+async function transcribeAudioBuffer(buffer, mimeType = "audio/webm") {
+  if (!openAiKey) {
+    console.error("[vercel] OpenAI key missing for transcription");
+    throw new Error("Missing OPENAI_API_KEY or openKey");
+  }
+
+  console.log(`[vercel] OpenAI transcription start model=${openAiTranscribeModel} bytes=${buffer.length}`);
+  const extension = mimeType.includes("mp4")
+    ? "mp4"
+    : mimeType.includes("mpeg")
+      ? "mp3"
+      : mimeType.includes("ogg")
+        ? "ogg"
+        : "webm";
+  const form = new FormData();
+  form.append("model", openAiTranscribeModel);
+  form.append("file", new Blob([buffer], { type: mimeType }), `voice.${extension}`);
+
+  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${openAiKey}`,
+    },
+    body: form,
+  });
+
+  const data = await response.json();
+  console.log(`[vercel] OpenAI transcription response status=${response.status} ok=${response.ok}`);
+  if (!response.ok) {
+    console.error("[vercel] OpenAI transcription error body", data);
+    throw new Error(data.error?.message || "OpenAI transcription failed");
+  }
+
+  return String(data.text || "").trim();
+}
+
 async function readJsonBody(request) {
   if (request.body && typeof request.body === "object") return request.body;
   if (typeof request.body === "string") return JSON.parse(request.body || "{}");
@@ -332,4 +369,5 @@ module.exports = {
   sendAudio,
   sendJson,
   synthesizeSpeech,
+  transcribeAudioBuffer,
 };

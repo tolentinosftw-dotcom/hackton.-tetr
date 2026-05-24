@@ -4,5 +4,7 @@ data/*.txt
 amazon-page_files/
 node_modules/
 public/
+server-*.log
+server-*.err
 .DS_Store
 Thumbs.db
