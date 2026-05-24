@@ -663,13 +663,7 @@ function isNo(value) {
 }
 
 function openExternalUrl(url) {
-  const link = document.createElement("a");
-  link.href = url;
-  link.target = "_blank";
-  link.rel = "noopener noreferrer";
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  window.location.href = url;
 }
 
 function buildWhatsappUrl(product, address) {
@@ -785,6 +779,7 @@ function buildCheckoutWhatsappUrl(productsToBuy = getCheckoutProducts()) {
 
 function openCheckoutWhatsapp(productsToBuy = getCheckoutProducts(), language = "en") {
   const checkoutProducts = productsToBuy.filter(Boolean);
+  checkoutState.voiceEnabled = false;
   if (!checkoutProducts.length) {
     const message = "Choose a product first, then I can open WhatsApp checkout.";
     addChatMessage("ai", message);
@@ -801,19 +796,11 @@ function openCheckoutWhatsapp(productsToBuy = getCheckoutProducts(), language = 
   });
   openExternalUrl(whatsappUrl);
 
-  const shouldSpeak = checkoutState.voiceEnabled;
   const answer = phrase("openedWhatsapp", language);
   remember("assistant", answer);
   addChatMessage("ai", answer);
-  if (shouldSpeak) {
-    speakAndShow(answer).catch((error) => {
-      console.error("[error] checkout voice response failed", error);
-      showAssistantText(answer, "Ready");
-    }).finally(resetCheckout);
-  } else {
-    showAssistantText(answer, "Ready");
-    resetCheckout();
-  }
+  showAssistantText(answer, "Ready");
+  resetCheckout();
 }
 
 function openCheckoutForm(productsToBuy = getCheckoutProducts()) {
@@ -1861,13 +1848,8 @@ checkoutForm?.addEventListener("submit", (event) => {
     `Ciudad: ${customerCity}\n` +
     `Cliente: ${customerName}`;
 
-  const link = document.createElement("a");
-  link.href = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
-  link.target = "_blank";
-  link.rel = "noopener noreferrer";
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+  openExternalUrl(whatsappUrl);
 
   console.log("[checkout] whatsapp opened", {
     productIds: checkoutProducts.map((product) => product.id),
