@@ -3,7 +3,6 @@ const resultSummary = document.querySelector("#result-summary");
 const searchForm = document.querySelector("#search-form");
 const searchInput = document.querySelector("#search-input");
 const categoryTabs = document.querySelector("#category-tabs");
-const voiceDemoButton = document.querySelector("#voice-demo-button");
 const clearButton = document.querySelector("#clear-button");
 const cartCount = document.querySelector("#cart-count");
 const cartTotal = document.querySelector("#cart-total");
@@ -11,7 +10,7 @@ const chatForm = document.querySelector("#chat-form");
 const chatInput = document.querySelector("#chat-input");
 const chatMessages = document.querySelector("#chat-messages");
 const assistantOrb = document.querySelector("#assistant-orb");
-const assistantVoiceButton = document.querySelector("#assistant-voice-button");
+const speakAgainButton = document.querySelector("#speak-again-button");
 const aiOrb = document.querySelector("#ai-orb");
 const assistantState = document.querySelector("#assistant-state");
 const assistantMessage = document.querySelector("#assistant-message");
@@ -87,9 +86,9 @@ let currentRecommendation = null;
 let checkoutState = createEmptyCheckout();
 let currentAudio = null;
 let currentAudioUrl = null;
-let pendingManualAudioUrl = null;
 let pendingManualAudioOptions = null;
 let pendingManualAudioText = "";
+let lastAudioBlob = null;
 let lastSpokenText = "";
 let assistantStateTimeout = null;
 let currentAssistantState = "idle";
@@ -193,6 +192,23 @@ function clearAssistantTimeout() {
   assistantStateTimeout = null;
 }
 
+function setSpeakButtonLabel(mode = currentAssistantState) {
+  if (!speakAgainButton) return;
+
+  const buttonStates = {
+    idle: { label: "Tap to speak", disabled: false },
+    listening: { label: "Listening...", disabled: true },
+    thinking: { label: "Thinking...", disabled: true },
+    speaking: { label: "Speaking...", disabled: true },
+    error: { label: "Try again", disabled: false },
+    "speak-again": { label: "Speak again", disabled: false },
+  };
+  const next = buttonStates[mode] || buttonStates.idle;
+  speakAgainButton.textContent = next.label;
+  speakAgainButton.disabled = next.disabled;
+  speakAgainButton.setAttribute("aria-label", next.label);
+}
+
 function setAssistantState(state = "idle", label = "") {
   const nextState = assistantStates[state] ? state : "idle";
   const config = assistantStates[nextState];
@@ -214,11 +230,7 @@ function setAssistantState(state = "idle", label = "") {
   assistantStatus.textContent = config.label;
   stageLabel.textContent = config.label;
   stageMessage.textContent = message;
-  if (assistantVoiceButton) {
-    assistantVoiceButton.setAttribute("aria-label", config.button);
-    assistantVoiceButton.dataset.label = config.button;
-  }
-  if (voiceDemoButton) voiceDemoButton.textContent = config.button;
+  setSpeakButtonLabel(nextState);
 
   if (nextState === "thinking") {
     assistantStateTimeout = window.setTimeout(() => {
@@ -227,7 +239,7 @@ function setAssistantState(state = "idle", label = "") {
       setAssistantState("error", timeoutMessage);
       stageTranscript.textContent = timeoutMessage;
       window.setTimeout(() => setAssistantState("idle"), 2600);
-    }, 12000);
+    }, 15000);
   }
 }
 
@@ -305,14 +317,12 @@ function hideManualPlayButton() {
 }
 
 function clearManualAudio() {
-  pendingManualAudioUrl = null;
   pendingManualAudioOptions = null;
   pendingManualAudioText = "";
   hideManualPlayButton();
 }
 
-function showManualPlayButton(audioUrl, spokenText, options = {}) {
-  pendingManualAudioUrl = audioUrl;
+function showManualPlayButton(spokenText, options = {}) {
   pendingManualAudioOptions = options;
   pendingManualAudioText = spokenText || lastSpokenText;
 
@@ -327,6 +337,7 @@ function stopCurrentAudio({ revokeUrl = true } = {}) {
     try {
       currentAudio.pause();
       currentAudio.currentTime = 0;
+      currentAudio.src = "";
     } catch (error) {
       console.error("[error] current audio cleanup failed", error);
     }
@@ -340,11 +351,11 @@ function stopCurrentAudio({ revokeUrl = true } = {}) {
   }
 }
 
-function withResponseTimeout(promise, label = "AI request") {
+function withResponseTimeout(promise, label = "AI request", timeoutMs = 15000) {
   return Promise.race([
     promise,
     new Promise((_, reject) => {
-      window.setTimeout(() => reject(new Error(`${label} timed out after 12 seconds`)), 12000);
+      window.setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs / 1000} seconds`)), timeoutMs);
     }),
   ]);
 }
@@ -962,7 +973,6 @@ async function runSearch(query, source = "manual") {
 function releaseAudioUrl(audioUrl) {
   if (audioUrl) URL.revokeObjectURL(audioUrl);
   if (currentAudioUrl === audioUrl) currentAudioUrl = null;
-  if (pendingManualAudioUrl === audioUrl) clearManualAudio();
   currentAudio = null;
 }
 
@@ -991,6 +1001,7 @@ function playAudioElement(audio, audioUrl, options = {}) {
     const handlePlaying = () => {
       if (playbackStarted) return;
       playbackStarted = true;
+      console.log("[tts] playback started");
       console.log("[tts] playback actually started");
       logClient("tts playback actually started");
       hideManualPlayButton();
@@ -1002,14 +1013,18 @@ function playAudioElement(audio, audioUrl, options = {}) {
       logClient("tts audio ended");
       releaseAudioUrl(audioUrl);
       setAssistantState(afterState.mode, afterState.message);
+      if (afterState.mode === "idle") setSpeakButtonLabel("speak-again");
+      clearManualAudio();
       finish({ played: true, ended: true });
     };
 
     const handleError = (event) => {
+      console.log("[tts] playback error", event);
       console.error("[tts] audio element error", event);
       logClientError("tts audio element error", audio.error || event);
       releaseAudioUrl(audioUrl);
       setAssistantState("error", "Audio failed. The answer is shown above.");
+      showManualPlayButton(options.spokenText || lastSpokenText, options);
       finish({ played: false, error: true });
     };
 
@@ -1032,8 +1047,10 @@ function playAudioElement(audio, audioUrl, options = {}) {
         console.error("[tts] playback blocked", error);
         logClientError("tts playback blocked", error);
         if (currentAudio === audio) currentAudio = null;
+        if (currentAudioUrl === audioUrl) currentAudioUrl = null;
+        URL.revokeObjectURL(audioUrl);
         setAssistantState("error", "Audio blocked. Tap Play response.");
-        showManualPlayButton(audioUrl, options.spokenText || lastSpokenText, options);
+        showManualPlayButton(options.spokenText || lastSpokenText, options);
         finish({ played: false, blocked: true, error });
       });
   });
@@ -1050,13 +1067,17 @@ async function speak(text, options = {}) {
     logClient("tts stopping current audio");
     stopCurrentAudio({ revokeUrl: true });
 
-    const response = await fetch("/api/tts", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ text }),
-    });
+    const response = await withResponseTimeout(
+      fetch("/api/tts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ text }),
+      }),
+      "TTS request",
+      15000
+    );
 
     console.log(`[tts] response status: ${response.status}`, {
       ok: response.ok,
@@ -1087,6 +1108,7 @@ async function speak(text, options = {}) {
     });
 
     if (!audioBlob.size) throw new Error("TTS returned an empty audio blob");
+    lastAudioBlob = audioBlob;
 
     const audioUrl = URL.createObjectURL(audioBlob);
     console.log("[tts] audio url created");
@@ -1108,7 +1130,7 @@ async function speak(text, options = {}) {
 }
 
 async function playPendingManualAudio() {
-  if (!pendingManualAudioUrl) return;
+  if (!lastAudioBlob) return;
   console.log("[tts] manual playback requested");
   logClient("tts manual playback requested");
 
@@ -1116,28 +1138,28 @@ async function playPendingManualAudio() {
     try {
       currentAudio.pause();
       currentAudio.currentTime = 0;
+      currentAudio.src = "";
     } catch (error) {
       console.error("[error] current audio pause failed", error);
     }
   }
 
   setAssistantState("thinking", "Starting audio...");
-  const audio = new Audio(pendingManualAudioUrl);
+  const audioUrl = URL.createObjectURL(lastAudioBlob);
+  const audio = new Audio(audioUrl);
   currentAudio = audio;
-  currentAudioUrl = pendingManualAudioUrl;
-  await playAudioElement(audio, pendingManualAudioUrl, {
+  currentAudioUrl = audioUrl;
+  await playAudioElement(audio, audioUrl, {
     ...(pendingManualAudioOptions || {}),
     spokenText: pendingManualAudioText,
   });
 }
 
 async function startVoiceDemo() {
-  console.log("[voice] talk button clicked");
-  console.log("[voice] button clicked");
+  console.log("[voice] speak button clicked");
   logClient("voice start requested");
-  console.log("[voice] listening requested");
   openAssistantStage("Listening...");
-  setAssistantState("listening", "Starting microphone...");
+  setAssistantState("thinking", "Requesting microphone permission...");
   startRecordedVoiceInput();
 }
 
@@ -1194,7 +1216,7 @@ async function transcribeAudioBlob(blob) {
 
   const data = await response.json();
   const transcript = String(data.text || "").trim();
-  console.log("[voice] transcript received", { transcript });
+  console.log(`[voice] transcript received: ${transcript}`);
   return transcript;
 }
 
@@ -1213,6 +1235,7 @@ async function startRecordedVoiceInput() {
   }
 
   try {
+    console.log("[voice] requesting microphone permission");
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const mimeType = getSupportedAudioMimeType();
     const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
@@ -1231,13 +1254,14 @@ async function startRecordedVoiceInput() {
       activeRecordingTimer = window.setTimeout(() => {
         console.log("[voice] auto recording stop");
         stopActiveRecording();
-      }, checkoutState.awaiting === "address" ? 9000 : 5200);
+      }, 8000);
     });
 
     recorder.addEventListener("stop", async () => {
       try {
         cleanupRecording();
         if (!chunks.length) {
+          console.log("[voice] no speech detected");
           await handleVoiceRecognitionFailure("I didn't catch that. Please try again.");
           return;
         }
@@ -1245,8 +1269,9 @@ async function startRecordedVoiceInput() {
         setAssistantState("thinking", "Thinking...");
         stageTranscript.textContent = "Processing your voice...";
         const audioBlob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
-        const transcript = await withResponseTimeout(transcribeAudioBlob(audioBlob), "Voice transcription");
+        const transcript = await withResponseTimeout(transcribeAudioBlob(audioBlob), "Voice transcription", 15000);
         if (!transcript) {
+          console.log("[voice] no speech detected");
           await handleVoiceRecognitionFailure("I didn't catch that. Please try again.");
           return;
         }
@@ -1269,8 +1294,8 @@ async function startRecordedVoiceInput() {
   } catch (error) {
     console.error("[error] microphone recording start failed", error);
     await handleVoiceRecognitionFailure(
-      "Microphone permission is blocked. Please allow microphone access or type your request.",
-      "Microphone permission is blocked. Please type your request."
+      "Microphone permission needed. Please allow microphone access or type your request.",
+      "Microphone permission needed. Please type your request."
     );
   }
 }
@@ -1279,21 +1304,12 @@ async function handleVoiceRecognitionFailure(message, spokenText = message) {
   stageTranscript.textContent = message;
   addChatMessage("ai", message);
   setAssistantState("error", message);
-  try {
-    await speakAndShow(message, {
-      spokenText,
-      afterMode: "error",
-      afterMessage: message,
-    });
-  } catch (error) {
-    console.error("[error] voice failure message could not be spoken", error);
-    setAssistantState("error", message);
-  }
 }
 
 function beginVoiceRecognition() {
   logClient("voice recognition setup");
   openAssistantStage("Listening...");
+  console.log("[voice] requesting microphone permission");
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   if (!SpeechRecognition) {
@@ -1318,8 +1334,13 @@ function beginVoiceRecognition() {
   });
 
   recognition.addEventListener("result", (event) => {
-    const transcript = event.results[0][0].transcript;
-    console.log("[voice] transcript received", { transcript });
+    const transcript = String(event.results[0][0].transcript || "").trim();
+    if (!transcript) {
+      console.log("[voice] no speech detected");
+      handleVoiceRecognitionFailure("I didn't catch that. Try again.");
+      return;
+    }
+    console.log(`[voice] transcript received: ${transcript}`);
     logClient("voice recognition result", { transcript });
     stageTranscript.textContent = transcript;
     setAssistantState("thinking", "Thinking...");
@@ -1331,7 +1352,7 @@ function beginVoiceRecognition() {
     logClientError("voice recognition error", event.error || event);
     const message =
       event.error === "not-allowed"
-        ? "Microphone permission is blocked. Please allow microphone access."
+        ? "Microphone permission needed. Please allow microphone access."
         : event.error === "network"
           ? "Voice recognition had a network problem. Please try again or type your request."
           : "I didn't catch that. Please try again.";
@@ -1340,13 +1361,15 @@ function beginVoiceRecognition() {
 
   recognition.addEventListener("nomatch", () => {
     console.error("[error] voice recognition no match");
-    handleVoiceRecognitionFailure("I didn't catch that. Please try again.");
+    console.log("[voice] no speech detected");
+    handleVoiceRecognitionFailure("I didn't catch that. Try again.");
   });
 
   recognition.addEventListener("end", () => {
     console.log("[voice] listening ended");
     if (currentAssistantState === "listening") {
-      handleVoiceRecognitionFailure("I didn't catch that. Please try again.");
+      console.log("[voice] no speech detected");
+      handleVoiceRecognitionFailure("I didn't catch that. Try again.");
     }
   });
 
@@ -1598,8 +1621,7 @@ clearButton.addEventListener("click", () => {
   runSearch("");
 });
 
-voiceDemoButton.addEventListener("click", startVoiceDemo);
-assistantVoiceButton?.addEventListener("click", startVoiceDemo);
+speakAgainButton?.addEventListener("click", startVoiceDemo);
 manualPlayButton?.addEventListener("click", playPendingManualAudio);
 
 chatForm.addEventListener("submit", async (event) => {

@@ -25,9 +25,6 @@
         <button class="icon-button" type="submit" aria-label="Search">
           <span aria-hidden="true">Search</span>
         </button>
-        <button id="voice-demo-button" class="search-voice-button" type="button">
-          Tap to speak
-        </button>
       </form>
 
       <button class="cart-button" type="button" aria-label="View cart">
@@ -87,13 +84,14 @@
     </main>
 
     <aside class="assistant-orb ai-assistant idle" id="assistant-orb" aria-live="polite">
-      <button class="assistant-voice-button" id="assistant-voice-button" type="button" aria-label="Tap to speak" data-label="Tap to speak">
-        <div id="ai-orb" class="ai-orb idle" aria-hidden="true">
-          <div class="orb-ring ring-one"></div>
-          <div class="orb-ring ring-two"></div>
-          <div class="orb-ring ring-three"></div>
-          <div class="orb-core"></div>
-        </div>
+      <div id="ai-orb" class="ai-orb idle" aria-hidden="true">
+        <div class="orb-ring ring-one"></div>
+        <div class="orb-ring ring-two"></div>
+        <div class="orb-ring ring-three"></div>
+        <div class="orb-core"></div>
+      </div>
+      <button class="speak-again-button" id="speak-again-button" type="button" aria-label="Tap to speak">
+        Tap to speak
       </button>
       <div class="assistant-copy">
         <strong id="assistant-state">Ready</strong>
