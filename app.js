@@ -84,6 +84,7 @@ let cart = [];
 let conversationHistory = [];
 let currentRecommendation = null;
 let checkoutState = createEmptyCheckout();
+let voiceSessionActive = false;
 let currentAudio = null;
 let currentAudioUrl = null;
 let pendingManualAudioOptions = null;
@@ -196,16 +197,16 @@ function setSpeakButtonLabel(mode = currentAssistantState) {
   if (!speakAgainButton) return;
 
   const buttonStates = {
-    idle: { label: "Tap to speak", disabled: false },
-    listening: { label: "Listening...", disabled: true },
-    thinking: { label: "Thinking...", disabled: true },
-    speaking: { label: "Speaking...", disabled: true },
+    idle: { label: voiceSessionActive ? "End session" : "Start voice", disabled: false },
+    listening: { label: "Listening... (tap to end)", disabled: false },
+    thinking: { label: "Thinking... (tap to end)", disabled: false },
+    speaking: { label: "Speaking... (tap to interrupt)", disabled: false },
     error: { label: "Try again", disabled: false },
-    "speak-again": { label: "Speak again", disabled: false },
+    "speak-again": { label: voiceSessionActive ? "End session" : "Start voice", disabled: false },
   };
   const next = buttonStates[mode] || buttonStates.idle;
   speakAgainButton.textContent = next.label;
-  speakAgainButton.disabled = next.disabled;
+  speakAgainButton.disabled = false;
   speakAgainButton.setAttribute("aria-label", next.label);
 }
 
@@ -238,7 +239,13 @@ function setAssistantState(state = "idle", label = "") {
       console.error("[error] assistant thinking timeout");
       setAssistantState("error", timeoutMessage);
       stageTranscript.textContent = timeoutMessage;
-      window.setTimeout(() => setAssistantState("idle"), 2600);
+      window.setTimeout(() => {
+        if (voiceSessionActive) {
+          resumeListening();
+          return;
+        }
+        setAssistantState("idle");
+      }, 2600);
     }, 15000);
   }
 }
@@ -1022,9 +1029,17 @@ function playAudioElement(audio, audioUrl, options = {}) {
       console.log("[tts] playback ended");
       logClient("tts audio ended");
       releaseAudioUrl(audioUrl);
-      setAssistantState(afterState.mode, afterState.message);
-      if (afterState.mode === "idle") setSpeakButtonLabel("speak-again");
       clearManualAudio();
+
+      if (voiceSessionActive && !isCheckoutActive()) {
+        console.log("[voice] auto-resuming after response");
+        window.setTimeout(() => {
+          if (voiceSessionActive && !isCheckoutActive()) startListeningWithVAD();
+        }, 700);
+      } else {
+        setAssistantState(afterState.mode, afterState.message);
+        if (afterState.mode === "idle") setSpeakButtonLabel("speak-again");
+      }
       finish({ played: true, ended: true });
     };
 
@@ -1168,6 +1183,12 @@ async function playPendingManualAudio() {
 
   audio.addEventListener("ended", () => {
     console.log("[tts] manual playback ended");
+    if (voiceSessionActive && !isCheckoutActive()) {
+      window.setTimeout(() => {
+        if (voiceSessionActive && !isCheckoutActive()) resumeListening();
+      }, 700);
+      return;
+    }
     setAssistantState("idle");
     const speakBtn = document.querySelector(".speak-again-button");
     if (speakBtn) {
@@ -1198,10 +1219,23 @@ async function playPendingManualAudio() {
 async function startVoiceDemo() {
   console.log("[voice] speak button clicked");
   logClient("voice start requested");
+  voiceSessionActive = true;
   openAssistantStage("Listening...");
   setAssistantState("thinking", "Requesting microphone permission...");
   startRecordedVoiceInput();
 }
+
+function resumeListening() {
+  if (!voiceSessionActive) return;
+  if (isCheckoutActive()) {
+    setAssistantState("idle");
+    return;
+  }
+  console.log("[voice] resuming listening");
+  startRecordedVoiceInput();
+}
+
+const startListeningWithVAD = resumeListening;
 
 function getSupportedAudioMimeType() {
   const types = [
