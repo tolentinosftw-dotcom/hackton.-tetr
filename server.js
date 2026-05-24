@@ -379,6 +379,17 @@ function serveStatic(request, response) {
 const server = http.createServer(async (request, response) => {
   console.log(`[server] ${request.method} ${request.url}`);
   try {
+    if (request.method === "GET" && request.url === "/api/health") {
+      console.log("[server] health check ok");
+      sendJson(response, 200, {
+        ok: true,
+        openAiKeyLoaded: Boolean(openAiKey),
+        elevenLabsKeyLoaded: Boolean(elevenLabsKey),
+        elevenLabsVoiceId,
+      });
+      return;
+    }
+
     if (request.method === "GET" && request.url.startsWith("/api/products/")) {
       const id = decodeURIComponent(request.url.replace("/api/products/", ""));
       console.log(`[server] product detail request id=${id}`);

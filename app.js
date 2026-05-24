@@ -542,8 +542,22 @@ async function speak(text) {
   }
 }
 
-function startVoiceDemo() {
+async function startVoiceDemo() {
   logClient("voice start requested");
+  openAssistantStage("Starting voice assistant...");
+  setAssistant("speaking", "Hi, what are you shopping for today?");
+
+  try {
+    await speak("Hi, what are you shopping for today?");
+  } catch (error) {
+    logClientError("voice greeting failed before recognition", error);
+  }
+
+  beginVoiceRecognition();
+}
+
+function beginVoiceRecognition() {
+  logClient("voice recognition setup");
   openAssistantStage("Listening...");
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
