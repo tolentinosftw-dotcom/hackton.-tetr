@@ -3,5 +3,6 @@ data/*.txt
 .env
 amazon-page_files/
 node_modules/
+public/
 .DS_Store
 Thumbs.db
