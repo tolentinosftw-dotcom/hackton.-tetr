@@ -2,10 +2,13 @@
   "name": "hak-tetr",
   "version": "1.0.0",
   "description": "Voice-commerce prototype with:",
-  "main": "app.js",
+  "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js"
+  },
+  "engines": {
+    "node": "20.x"
   },
   "keywords": [],
   "author": "",
