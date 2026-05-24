@@ -26,6 +26,7 @@ const stageTranscript = document.querySelector("#stage-transcript");
 const productDialog = document.querySelector("#product-dialog");
 const dialogClose = document.querySelector("#dialog-close");
 const productDetail = document.querySelector("#product-detail");
+const defaultChatPlaceholder = chatInput?.getAttribute("placeholder") || "Ask about your cart";
 
 const assistantStates = {
   idle: {
@@ -53,6 +54,20 @@ const assistantStates = {
     button: "Try again",
     message: "I couldn't hear you. Try again.",
   },
+};
+
+const checkoutAwaitingLabels = {
+  name: "Tap to answer your name.",
+  address: "Tap to answer your address.",
+  city: "Tap to answer your city.",
+  confirmation: "Tap to confirm or change.",
+};
+
+const writtenCheckoutLabels = {
+  name: "Type your name in the chat.",
+  address: "Type your delivery address in the chat.",
+  city: "Type your city in the chat.",
+  confirmation: "Type yes to confirm, or no to change.",
 };
 
 let products = [];
@@ -107,6 +122,7 @@ function createEmptyCheckout() {
     city: "",
     awaiting: null,
     readyToConfirm: false,
+    voiceEnabled: false,
   };
 }
 
@@ -205,6 +221,69 @@ function setAssistantState(state = "idle", label = "") {
 
 function setAssistant(mode, message) {
   setAssistantState(mode, message);
+}
+
+function getCheckoutAwaitingMessage() {
+  return checkoutAwaitingLabels[checkoutState.awaiting] || "Tap to answer.";
+}
+
+function getWrittenCheckoutMessage() {
+  return writtenCheckoutLabels[checkoutState.awaiting] || "Type your answer in the chat.";
+}
+
+function isVoiceSource(source = "") {
+  return source === "voice-demo" || source === "elevenlabs";
+}
+
+function resetChatInputPlaceholder() {
+  if (!chatInput) return;
+  chatInput.placeholder = defaultChatPlaceholder;
+}
+
+function focusCheckoutInput() {
+  if (!chatInput) return;
+  chatInput.placeholder = getWrittenCheckoutMessage();
+  chatInput.focus({ preventScroll: true });
+}
+
+async function speakAndWaitForCheckoutAnswer(answer, awaiting, language = "en") {
+  checkoutState.awaiting = awaiting;
+  const afterMessage = getCheckoutAwaitingMessage();
+  await speakAndShow(answer, {
+    afterMode: "idle",
+    afterMessage,
+  });
+}
+
+async function promptCheckoutAnswer(answer, awaiting, language = "en") {
+  checkoutState.awaiting = awaiting;
+
+  if (checkoutState.voiceEnabled) {
+    await speakAndWaitForCheckoutAnswer(answer, awaiting, language);
+    return;
+  }
+
+  const afterMessage = getWrittenCheckoutMessage();
+  stageTranscript.textContent = answer;
+  setAssistantState("idle", afterMessage);
+  focusCheckoutInput();
+}
+
+async function respondCheckoutMessage(answer, language = "en") {
+  if (checkoutState.voiceEnabled) {
+    await speakAndShow(answer);
+    return;
+  }
+
+  stageTranscript.textContent = answer;
+  setAssistantState("idle", checkoutState.awaiting ? getWrittenCheckoutMessage() : "Checkout updated.");
+  focusCheckoutInput();
+}
+
+function showAssistantText(text, label = "Ready") {
+  logClient("assistant text only", { chars: text.length, label });
+  stageTranscript.textContent = text;
+  setAssistantState("idle", label);
 }
 
 function withResponseTimeout(promise, label = "AI request") {
@@ -535,6 +614,7 @@ function setCheckoutProducts(items) {
 
 function resetCheckout() {
   checkoutState = createEmptyCheckout();
+  resetChatInputPlaceholder();
 }
 
 function isCheckoutActive() {
@@ -619,6 +699,7 @@ async function runSearch(query, source = "manual") {
   activeQuery = query.trim();
   const language = detectLanguage(activeQuery);
   resetCheckout();
+  checkoutState.voiceEnabled = isVoiceSource(source);
   currentRecommendation = null;
   searchInput.value = activeQuery;
   setAssistant("thinking", activeQuery ? `Thinking about: ${activeQuery}` : "Showing the full catalog.");
@@ -687,10 +768,14 @@ async function runSearch(query, source = "manual") {
 
   if (activeQuery) {
     addChatMessage("ai", answer);
-    speakAndShow(answer).catch((error) => {
-      console.error("[error] voice response failed", error);
-      setAssistantState("idle");
-    });
+    if (isVoiceSource(source)) {
+      speakAndShow(answer).catch((error) => {
+        console.error("[error] voice response failed", error);
+        setAssistantState("idle");
+      });
+    } else {
+      showAssistantText(answer, "Product search ready.");
+    }
   } else {
     setAssistantState("idle");
   }
@@ -881,6 +966,7 @@ async function transcribeAudioBlob(blob) {
 async function startRecordedVoiceInput() {
   if (activeMediaRecorder && activeMediaRecorder.state === "recording") {
     console.log("[voice] manual recording stop");
+    setAssistantState("thinking", "Processing your voice...");
     stopActiveRecording();
     return;
   }
@@ -905,12 +991,12 @@ async function startRecordedVoiceInput() {
 
     recorder.addEventListener("start", () => {
       console.log("[voice] listening started");
-      setAssistantState("listening", "Listening...");
-      stageTranscript.textContent = "Listening... speak now.";
+      setAssistantState("listening", "Listening... tap again when done.");
+      stageTranscript.textContent = "Listening... speak now. Tap again when done.";
       activeRecordingTimer = window.setTimeout(() => {
         console.log("[voice] auto recording stop");
         stopActiveRecording();
-      }, 6500);
+      }, checkoutState.awaiting === "address" ? 9000 : 5200);
     });
 
     recorder.addEventListener("stop", async () => {
@@ -1099,62 +1185,65 @@ async function handleCommerceConversation(message, source = "manual") {
     currentRecommendation: currentRecommendation?.id || null,
   });
 
+  if (!isVoiceSource(source) && isCheckoutActive()) {
+    checkoutState.voiceEnabled = false;
+    logClient("checkout switched to written mode", { source });
+  }
+
   openAssistantStage(cleanMessage);
   if (source !== "chat") addChatMessage("user", cleanMessage);
 
   if (!checkoutState.selectedProducts.length && cart.length && wantsCheckout(cleanMessage)) {
     setCheckoutProducts(cart);
-    checkoutState.awaiting = "name";
+    checkoutState.voiceEnabled = isVoiceSource(source);
     const answer = phrase("cartCheckout", language);
     remember("user", cleanMessage);
     remember("assistant", answer);
     addChatMessage("ai", answer);
-    await speakAndShow(answer);
+    await promptCheckoutAnswer(answer, "name", language);
     return;
   }
 
   if (checkoutState.selectedProduct && !checkoutState.awaiting && !checkoutState.readyToConfirm) {
     if (isYes(cleanMessage) || wantsCheckout(cleanMessage)) {
-      checkoutState.awaiting = "name";
+      checkoutState.voiceEnabled = isVoiceSource(source);
       const answer = phrase("askName", language);
       remember("user", cleanMessage);
       remember("assistant", answer);
       addChatMessage("ai", answer);
-      await speakAndShow(answer);
+      await promptCheckoutAnswer(answer, "name", language);
       return;
     }
 
     if (isNo(cleanMessage)) {
       logClient("checkout declined", { productId: checkoutState.selectedProduct.id });
-      resetCheckout();
       const answer = phrase("decline", language);
       remember("user", cleanMessage);
       remember("assistant", answer);
       addChatMessage("ai", answer);
-      await speakAndShow(answer);
+      await respondCheckoutMessage(answer, language);
+      resetCheckout();
       return;
     }
   }
 
   if (checkoutState.awaiting === "name") {
     checkoutState.customerName = cleanMessage;
-    checkoutState.awaiting = "address";
     const answer = phrase("askAddress", language);
     remember("user", cleanMessage);
     remember("assistant", answer);
     addChatMessage("ai", answer);
-    await speakAndShow(answer);
+    await promptCheckoutAnswer(answer, "address", language);
     return;
   }
 
   if (checkoutState.awaiting === "address") {
     checkoutState.address = cleanMessage;
-    checkoutState.awaiting = "city";
     const answer = phrase("askCity", language);
     remember("user", cleanMessage);
     remember("assistant", answer);
     addChatMessage("ai", answer);
-    await speakAndShow(answer);
+    await promptCheckoutAnswer(answer, "city", language);
     return;
   }
 
@@ -1168,7 +1257,7 @@ async function handleCommerceConversation(message, source = "manual") {
     remember("user", cleanMessage);
     remember("assistant", answer);
     addChatMessage("ai", answer);
-    await speakAndShow(answer);
+    await respondCheckoutMessage(answer, language);
     return;
   }
 
@@ -1181,24 +1270,24 @@ async function handleCommerceConversation(message, source = "manual") {
       remember("assistant", answer);
       addChatMessage("ai", answer);
       window.open(whatsappUrl, "_blank", "noopener");
-      await speakAndShow(answer);
+      await respondCheckoutMessage(answer, language);
       resetCheckout();
       return;
     }
 
     if (isNo(cleanMessage)) {
-      resetCheckout();
       const answer = phrase("decline", language);
       remember("user", cleanMessage);
       remember("assistant", answer);
       addChatMessage("ai", answer);
-      await speakAndShow(answer);
+      await respondCheckoutMessage(answer, language);
+      resetCheckout();
       return;
     }
 
     const answer = phrase("needConfirmation", language);
     addChatMessage("ai", answer);
-    await speakAndShow(answer);
+    await respondCheckoutMessage(answer, language);
     return;
   }
 
@@ -1327,10 +1416,7 @@ chatForm.addEventListener("submit", async (event) => {
   conversationHistory = conversationHistory.slice(-10);
 
   addChatMessage("ai", answer);
-  speakAndShow(answer).catch((error) => {
-    console.error("[error] chat voice response failed", error);
-    setAssistantState("idle");
-  });
+  showAssistantText(answer, "Reply ready.");
 });
 
 productGrid.addEventListener("click", (event) => {
@@ -1355,7 +1441,7 @@ productGrid.addEventListener("click", (event) => {
   if (!product) return;
 
   addToCart(product);
-  setAssistant("speaking", `${product.name} added to your cart.`);
+  setAssistant("idle", `${product.name} added to your cart.`);
 });
 
 productDetail.addEventListener("click", async (event) => {
@@ -1374,14 +1460,15 @@ productDetail.addEventListener("click", async (event) => {
     logClient("detail buy clicked", { id: buyButton.dataset.buyNow });
     const product = findProduct(buyButton.dataset.buyNow);
     if (!product) return;
+    resetCheckout();
     currentRecommendation = product;
     setCheckoutProducts([product]);
-    checkoutState.awaiting = "name";
+    checkoutState.voiceEnabled = false;
     const answer = phrase("askName", "en");
     productDialog.close();
     remember("assistant", answer);
     addChatMessage("ai", answer);
-    await speakAndShow(answer);
+    await promptCheckoutAnswer(answer, "name", "en");
   }
 });
 
