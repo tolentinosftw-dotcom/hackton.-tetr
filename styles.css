@@ -618,6 +618,21 @@ h2 {
   line-height: 1.5;
 }
 
+.manual-play-button {
+  min-height: 46px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 18px;
+  background: #ffffff;
+  color: var(--accent-strong);
+  font-weight: 900;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.18);
+}
+
+.manual-play-button[hidden] {
+  display: none;
+}
+
 .product-dialog,
 .checkout-dialog {
   width: min(860px, calc(100vw - 28px));
@@ -861,7 +876,8 @@ elevenlabs-convai {
   .assistant-orb {
     left: 12px;
     right: 12px;
-    bottom: 84px;
+    top: 112px;
+    bottom: auto;
     grid-template-columns: 84px 1fr;
   }
 

@@ -23,6 +23,7 @@ const stageAiOrb = document.querySelector("#stage-ai-orb");
 const stageLabel = document.querySelector("#stage-label");
 const stageMessage = document.querySelector("#stage-message");
 const stageTranscript = document.querySelector("#stage-transcript");
+const manualPlayButton = document.querySelector("#manual-play-button");
 const productDialog = document.querySelector("#product-dialog");
 const dialogClose = document.querySelector("#dialog-close");
 const productDetail = document.querySelector("#product-detail");
@@ -38,8 +39,8 @@ const defaultChatPlaceholder = chatInput?.getAttribute("placeholder") || "Ask ab
 const assistantStates = {
   idle: {
     label: "Ready",
-    button: "Talk to AI",
-    message: "Search, buy, or talk to AI.",
+    button: "Tap to speak",
+    message: "Search, buy, or tap to speak.",
   },
   listening: {
     label: "Listening...",
@@ -86,6 +87,9 @@ let currentRecommendation = null;
 let checkoutState = createEmptyCheckout();
 let currentAudio = null;
 let currentAudioUrl = null;
+let pendingManualAudioUrl = null;
+let pendingManualAudioOptions = null;
+let pendingManualAudioText = "";
 let lastSpokenText = "";
 let assistantStateTimeout = null;
 let currentAssistantState = "idle";
@@ -194,6 +198,7 @@ function setAssistantState(state = "idle", label = "") {
   const config = assistantStates[nextState];
   const message = label || config.message;
 
+  console.log(`[assistant-state] ${nextState}`, { label: message });
   logClient("assistant state", { state: nextState, message });
   clearAssistantTimeout();
   currentAssistantState = nextState;
@@ -291,6 +296,48 @@ function showAssistantText(text, label = "Ready") {
   logClient("assistant text only", { chars: text.length, label });
   stageTranscript.textContent = text;
   setAssistantState("idle", label);
+}
+
+function hideManualPlayButton() {
+  if (!manualPlayButton) return;
+  manualPlayButton.hidden = true;
+  manualPlayButton.disabled = true;
+}
+
+function clearManualAudio() {
+  pendingManualAudioUrl = null;
+  pendingManualAudioOptions = null;
+  pendingManualAudioText = "";
+  hideManualPlayButton();
+}
+
+function showManualPlayButton(audioUrl, spokenText, options = {}) {
+  pendingManualAudioUrl = audioUrl;
+  pendingManualAudioOptions = options;
+  pendingManualAudioText = spokenText || lastSpokenText;
+
+  if (!manualPlayButton) return;
+  manualPlayButton.textContent = detectLanguage(pendingManualAudioText) === "es" ? "Reproducir respuesta" : "Play response";
+  manualPlayButton.hidden = false;
+  manualPlayButton.disabled = false;
+}
+
+function stopCurrentAudio({ revokeUrl = true } = {}) {
+  if (currentAudio) {
+    try {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+    } catch (error) {
+      console.error("[error] current audio cleanup failed", error);
+    }
+    currentAudio = null;
+  }
+
+  if (revokeUrl && currentAudioUrl) {
+    URL.revokeObjectURL(currentAudioUrl);
+    currentAudioUrl = null;
+    clearManualAudio();
+  }
 }
 
 function withResponseTimeout(promise, label = "AI request") {
@@ -807,14 +854,8 @@ async function speakAndShow(text, options = {}) {
   logClient("speak and show", { chars: spokenText.length, text, spokenText });
   stageTranscript.textContent = text;
   openAssistantStage(text);
-  setAssistantState("speaking", spokenText);
-  await speak(spokenText);
-
-  if (options.afterMode) {
-    setAssistant(options.afterMode, options.afterMessage || assistantStates.idle.message);
-  } else {
-    setAssistant("idle", "Ready. Press Talk to AI if you want voice help again.");
-  }
+  setAssistantState("thinking", "Preparing voice response...");
+  return speak(spokenText, options);
 }
 
 async function runSearch(query, source = "manual") {
@@ -918,39 +959,97 @@ async function runSearch(query, source = "manual") {
   };
 }
 
-function speakWithBrowser(text) {
-  logClient("browser speech fallback", {
-    available: "speechSynthesis" in window,
-    chars: text.length,
-  });
-  if (!("speechSynthesis" in window)) return Promise.resolve();
+function releaseAudioUrl(audioUrl) {
+  if (audioUrl) URL.revokeObjectURL(audioUrl);
+  if (currentAudioUrl === audioUrl) currentAudioUrl = null;
+  if (pendingManualAudioUrl === audioUrl) clearManualAudio();
+  currentAudio = null;
+}
 
+function getAfterAudioState(options = {}) {
+  return {
+    mode: options.afterMode || "idle",
+    message: options.afterMessage || "Ready. Tap to speak if you want voice help again.",
+  };
+}
+
+function playAudioElement(audio, audioUrl, options = {}) {
   return new Promise((resolve) => {
-    speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = detectLanguage(text) === "es" ? "es-CO" : "en-US";
-    utterance.onend = resolve;
-    utterance.onerror = resolve;
-    speechSynthesis.speak(utterance);
+    let finished = false;
+    let playbackStarted = false;
+    const afterState = getAfterAudioState(options);
+
+    const finish = (result) => {
+      if (finished) return;
+      finished = true;
+      audio.removeEventListener("playing", handlePlaying);
+      audio.removeEventListener("ended", handleEnded);
+      audio.removeEventListener("error", handleError);
+      resolve(result);
+    };
+
+    const handlePlaying = () => {
+      if (playbackStarted) return;
+      playbackStarted = true;
+      console.log("[tts] playback actually started");
+      logClient("tts playback actually started");
+      hideManualPlayButton();
+      setAssistantState("speaking", "Speaking...");
+    };
+
+    const handleEnded = () => {
+      console.log("[tts] playback ended");
+      logClient("tts audio ended");
+      releaseAudioUrl(audioUrl);
+      setAssistantState(afterState.mode, afterState.message);
+      finish({ played: true, ended: true });
+    };
+
+    const handleError = (event) => {
+      console.error("[tts] audio element error", event);
+      logClientError("tts audio element error", audio.error || event);
+      releaseAudioUrl(audioUrl);
+      setAssistantState("error", "Audio failed. The answer is shown above.");
+      finish({ played: false, error: true });
+    };
+
+    audio.addEventListener("playing", handlePlaying);
+    audio.addEventListener("ended", handleEnded);
+    audio.addEventListener("error", handleError);
+
+    console.log("[tts] attempting playback");
+    logClient("tts attempting playback");
+    audio
+      .play()
+      .then(() => {
+        console.log("[tts] playback play() resolved");
+        if (!playbackStarted && !audio.paused) {
+          handlePlaying();
+        }
+      })
+      .catch((error) => {
+        console.error("[tts] playback failed", error);
+        console.error("[tts] playback blocked", error);
+        logClientError("tts playback blocked", error);
+        if (currentAudio === audio) currentAudio = null;
+        setAssistantState("error", "Audio blocked. Tap Play response.");
+        showManualPlayButton(audioUrl, options.spokenText || lastSpokenText, options);
+        finish({ played: false, blocked: true, error });
+      });
   });
 }
 
-async function speak(text) {
+async function speak(text, options = {}) {
   lastSpokenText = text;
   console.log("[tts] request started", { chars: text.length });
   logClient("tts start", { chars: text.length, text });
+  hideManualPlayButton();
   try {
     if ("speechSynthesis" in window) speechSynthesis.cancel();
-    if (currentAudio) {
-      console.log("[tts] stopping previous audio");
-      logClient("tts stopping current audio");
-      currentAudio.pause();
-      currentAudio = null;
-    }
-    if (currentAudioUrl) {
-      URL.revokeObjectURL(currentAudioUrl);
-      currentAudioUrl = null;
-    }
+    console.log("[tts] stopping previous audio");
+    logClient("tts stopping current audio");
+    stopCurrentAudio({ revokeUrl: true });
+
     const response = await fetch("/api/tts", {
       method: "POST",
       headers: {
@@ -959,6 +1058,10 @@ async function speak(text) {
       body: JSON.stringify({ text }),
     });
 
+    console.log(`[tts] response status: ${response.status}`, {
+      ok: response.ok,
+      contentType: response.headers.get("content-type"),
+    });
     logClient("tts response", {
       status: response.status,
       ok: response.ok,
@@ -967,61 +1070,69 @@ async function speak(text) {
     if (!response.ok) {
       const errorText = await response.text();
       logClient("tts error body", errorText);
-      throw new Error(`TTS failed with ${response.status}`);
+      throw new Error(errorText || `TTS failed with ${response.status}`);
     }
+
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.toLowerCase().includes("audio")) {
+      const errorText = await response.text();
+      throw new Error(`TTS returned ${contentType || "unknown content type"}: ${errorText}`);
+    }
+
     const audioBlob = await response.blob();
-    console.log("[tts] audio received", { size: audioBlob.size, type: audioBlob.type });
+    console.log(`[tts] blob size: ${audioBlob.size}`, { type: audioBlob.type });
     logClient("tts blob", {
       size: audioBlob.size,
       type: audioBlob.type,
     });
+
+    if (!audioBlob.size) throw new Error("TTS returned an empty audio blob");
+
     const audioUrl = URL.createObjectURL(audioBlob);
+    console.log("[tts] audio url created");
     const audio = new Audio(audioUrl);
     currentAudio = audio;
     currentAudioUrl = audioUrl;
 
-    await new Promise((resolve, reject) => {
-      audio.addEventListener(
-        "ended",
-        () => {
-          console.log("[tts] playback ended");
-          logClient("tts audio ended");
-          URL.revokeObjectURL(audioUrl);
-          currentAudioUrl = null;
-          currentAudio = null;
-          resolve();
-        },
-        { once: true }
-      );
-      audio.addEventListener(
-        "error",
-        () => {
-          logClientError("tts audio element error", audio.error);
-          URL.revokeObjectURL(audioUrl);
-          currentAudioUrl = null;
-          currentAudio = null;
-          reject(audio.error || new Error("Audio playback failed"));
-        },
-        { once: true }
-      );
-      audio.play().then(() => {
-        console.log("[tts] playback started");
-        logClient("tts audio playing");
-      }).catch(reject);
+    return await playAudioElement(audio, audioUrl, {
+      ...options,
+      spokenText: text,
     });
   } catch (error) {
     console.error("[error] tts failed", error);
-    if (currentAudioUrl) {
-      URL.revokeObjectURL(currentAudioUrl);
-      currentAudioUrl = null;
-    }
-    currentAudio = null;
-    logClientError("tts failed, using browser fallback", error);
-    await speakWithBrowser(text);
+    stopCurrentAudio({ revokeUrl: true });
+    logClientError("tts failed", error);
+    setAssistantState("error", "Audio failed. The answer is shown above.");
+    return { played: false, error };
   }
 }
 
+async function playPendingManualAudio() {
+  if (!pendingManualAudioUrl) return;
+  console.log("[tts] manual playback requested");
+  logClient("tts manual playback requested");
+
+  if (currentAudio) {
+    try {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+    } catch (error) {
+      console.error("[error] current audio pause failed", error);
+    }
+  }
+
+  setAssistantState("thinking", "Starting audio...");
+  const audio = new Audio(pendingManualAudioUrl);
+  currentAudio = audio;
+  currentAudioUrl = pendingManualAudioUrl;
+  await playAudioElement(audio, pendingManualAudioUrl, {
+    ...(pendingManualAudioOptions || {}),
+    spokenText: pendingManualAudioText,
+  });
+}
+
 async function startVoiceDemo() {
+  console.log("[voice] talk button clicked");
   console.log("[voice] button clicked");
   logClient("voice start requested");
   console.log("[voice] listening requested");
@@ -1489,6 +1600,7 @@ clearButton.addEventListener("click", () => {
 
 voiceDemoButton.addEventListener("click", startVoiceDemo);
 assistantVoiceButton?.addEventListener("click", startVoiceDemo);
+manualPlayButton?.addEventListener("click", playPendingManualAudio);
 
 chatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
