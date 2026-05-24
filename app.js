@@ -198,9 +198,9 @@ function setSpeakButtonLabel(mode = currentAssistantState) {
 
   const buttonStates = {
     idle: { label: voiceSessionActive ? "End session" : "Start voice", disabled: false },
-    listening: { label: "Listening... (tap to end)", disabled: false },
-    thinking: { label: "Thinking... (tap to end)", disabled: false },
-    speaking: { label: "Speaking... (tap to interrupt)", disabled: false },
+    listening: { label: "Tap to end", disabled: false },
+    thinking: { label: "Tap to end", disabled: false },
+    speaking: { label: "Tap to interrupt", disabled: false },
     error: { label: "Try again", disabled: false },
     "speak-again": { label: voiceSessionActive ? "End session" : "Start voice", disabled: false },
   };
@@ -662,6 +662,16 @@ function isNo(value) {
   return /\b(no|not now|cancel|nope|later|despues|después)\b/i.test(value);
 }
 
+function openExternalUrl(url) {
+  const link = document.createElement("a");
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
 function buildWhatsappUrl(product, address) {
   const productsToBuy = product ? [product] : getCheckoutProducts();
   const details = {
@@ -789,7 +799,7 @@ function openCheckoutWhatsapp(productsToBuy = getCheckoutProducts(), language = 
   logClient("checkout whatsapp opened", {
     productIds: checkoutProducts.map((product) => product.id),
   });
-  window.open(whatsappUrl, "_blank", "noopener");
+  openExternalUrl(whatsappUrl);
 
   const shouldSpeak = checkoutState.voiceEnabled;
   const answer = phrase("openedWhatsapp", language);
@@ -1807,15 +1817,71 @@ checkoutClose?.addEventListener("click", () => {
 });
 checkoutForm?.addEventListener("submit", (event) => {
   event.preventDefault();
-  applyCheckoutDetails({
-    customerName: checkoutNameInput.value,
-    address: checkoutAddressInput.value,
-    city: checkoutCityInput.value,
-  });
+  checkoutState.voiceEnabled = false;
 
   const productsToBuy = getCheckoutProducts();
+  const checkoutProducts = productsToBuy.filter(Boolean);
+  const productName =
+    checkoutProducts.length > 1
+      ? checkoutProducts.map((product) => product.name).join(", ")
+      : checkoutProducts[0]?.name || "";
+  const productPrice =
+    checkoutProducts.length > 1
+      ? money.format(checkoutProducts.reduce((total, product) => total + Number(product.price || 0), 0))
+      : checkoutProducts[0]?.price
+        ? money.format(checkoutProducts[0].price)
+        : "";
+  const customerName = checkoutNameInput?.value.trim() || "";
+  const customerAddress = checkoutAddressInput?.value.trim() || "";
+  const customerCity = checkoutCityInput?.value.trim() || "";
+
+  const missingInput = [
+    checkoutNameInput,
+    checkoutAddressInput,
+    checkoutCityInput,
+  ].find((input) => !input?.value.trim());
+
+  if (!customerName || !customerAddress || !customerCity || missingInput) {
+    checkoutForm.reportValidity();
+    missingInput?.focus();
+    return;
+  }
+
+  applyCheckoutDetails({
+    customerName,
+    address: customerAddress,
+    city: customerCity,
+  });
+
+  const message =
+    `Hola, quiero comprar:\n` +
+    `Producto: ${productName}\n` +
+    `Precio: ${productPrice}\n` +
+    `Dirección: ${customerAddress}\n` +
+    `Ciudad: ${customerCity}\n` +
+    `Cliente: ${customerName}`;
+
+  const link = document.createElement("a");
+  link.href = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  console.log("[checkout] whatsapp opened", {
+    productIds: checkoutProducts.map((product) => product.id),
+  });
+  logClient("checkout whatsapp opened", {
+    productIds: checkoutProducts.map((product) => product.id),
+  });
+
   checkoutDialog.close();
-  openCheckoutWhatsapp(productsToBuy, detectLanguage(checkoutState.customerName));
+  const answer = phrase("openedWhatsapp", detectLanguage(customerName));
+  remember("assistant", answer);
+  addChatMessage("ai", answer);
+  showAssistantText(answer, "Ready");
+  resetCheckout();
 });
 stageClose.addEventListener("click", closeAssistantStage);
 

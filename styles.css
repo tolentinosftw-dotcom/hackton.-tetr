@@ -1126,3 +1126,131 @@ elevenlabs-convai {
     to   { transform: rotate(360deg) scale(1.02); }
   }
 }
+
+/* Mobile: keep the assistant in normal flow and protect the grid. */
+@media (max-width: 768px) {
+  body,
+  #app,
+  .app,
+  main,
+  [id="app"],
+  [class="app"] {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  .topbar {
+    order: 1;
+  }
+
+  .assistant-orb {
+    order: 2;
+  }
+
+  main {
+    order: 3;
+  }
+
+  .assistant-stage,
+  .assistant-stage.is-open,
+  #assistant-stage,
+  [class*="assistant"][class*="stage"],
+  [class*="voice"][class*="container"] {
+    display: none !important;
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    transform: none !important;
+    z-index: 1 !important;
+    width: 100% !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    padding: 16px 0 8px !important;
+    pointer-events: auto !important;
+  }
+
+  .assistant-orb {
+    position: relative !important;
+    inset: auto !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    transform: none !important;
+    z-index: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    width: auto !important;
+    margin: 12px;
+    padding: 16px 12px 12px !important;
+    pointer-events: auto !important;
+  }
+
+  .assistant-orb .assistant-copy {
+    display: block !important;
+    width: 100%;
+    text-align: center;
+  }
+
+  .assistant-copy h2,
+  .assistant-copy .state-heading,
+  [class*="assistant"][class*="label"]:not(.orb-state-label),
+  #assistant-message,
+  #assistant-status,
+  .stage-label,
+  #stage-message,
+  #stage-transcript {
+    display: none !important;
+  }
+
+  .orb-state-label {
+    display: block !important;
+    margin-top: 10px;
+    color: #f0f0f0;
+    font-size: 0.9rem;
+    font-weight: 900;
+  }
+
+  .ai-orb,
+  .assistant-orb .ai-orb,
+  .stage-ai-orb,
+  .orb-core {
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    transform: none !important;
+    z-index: 1 !important;
+    width: 72px !important;
+    height: 72px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .product-grid,
+  #product-grid,
+  .products-grid,
+  #products-grid,
+  [class*="product"][class*="grid"],
+  [class*="product"][class*="container"] {
+    position: relative !important;
+    z-index: 1 !important;
+  }
+
+  .catalog-shell {
+    order: 2;
+    padding: 16px 0 24px;
+  }
+
+  .catalog-heading,
+  .category-tabs {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .chat-shell {
+    order: 1;
+    padding: 0 12px 24px;
+  }
+}
