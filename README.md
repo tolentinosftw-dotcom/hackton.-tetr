@@ -47,6 +47,33 @@ If production says `not found` and the genie does not speak, the site is probabl
 
 Open DevTools Console and look for `[client]` logs. Run `node server.js` and look for `[server]` logs in the terminal. A `404` on `/api/tts` means the production host is not running `server.js`, so ElevenLabs audio will not work there until the backend is deployed too.
 
+## Deploy To Vercel
+
+This repo includes Vercel serverless functions in `api/`, so production can answer the same routes used locally:
+
+- `GET /api/health`
+- `POST /api/product-search`
+- `POST /api/shop-chat`
+- `POST /api/tts`
+
+Set these Environment Variables in Vercel:
+
+```text
+OPENAI_API_KEY=your_openai_key
+ELEVENLABS_API_KEY=your_elevenlabs_key
+ELEVENLABS_VOICE_ID=your_voice_id
+ELEVENLABS_MODEL_ID=eleven_multilingual_v2
+ELEVENLABS_OUTPUT_FORMAT=mp3_44100_128
+```
+
+After deploy, open:
+
+```text
+https://your-vercel-domain.vercel.app/api/health
+```
+
+It should return `ok: true`, `openAiKeyLoaded: true`, `elevenLabsKeyLoaded: true`, and your current `elevenLabsVoiceId`.
+
 ## Voice Purchase Flow
 
 1. Click the genie.
