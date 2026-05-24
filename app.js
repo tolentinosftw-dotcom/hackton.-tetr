@@ -352,12 +352,22 @@ function stopCurrentAudio({ revokeUrl = true } = {}) {
 }
 
 function withResponseTimeout(promise, label = "AI request", timeoutMs = 15000) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      window.setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs / 1000} seconds`)), timeoutMs);
-    }),
-  ]);
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(
+      () => reject(new Error(`${label} timed out after ${timeoutMs / 1000} seconds`)),
+      timeoutMs
+    );
+
+    promise
+      .then((value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      });
+  });
 }
 
 function openAssistantStage(transcript = "") {
@@ -1149,6 +1159,36 @@ async function playPendingManualAudio() {
   const audio = new Audio(audioUrl);
   currentAudio = audio;
   currentAudioUrl = audioUrl;
+  audio.addEventListener("playing", () => {
+    setAssistantState("speaking");
+    console.log("[tts] manual playback started");
+    const playBtn = document.querySelector(".manual-play-button");
+    if (playBtn) playBtn.style.display = "none";
+  });
+
+  audio.addEventListener("ended", () => {
+    console.log("[tts] manual playback ended");
+    setAssistantState("idle");
+    const speakBtn = document.querySelector(".speak-again-button");
+    if (speakBtn) {
+      speakBtn.style.display = "";
+      speakBtn.disabled = false;
+      speakBtn.textContent = "Speak again";
+    }
+    const playBtn = document.querySelector(".manual-play-button");
+    if (playBtn) playBtn.style.display = "none";
+  });
+
+  audio.addEventListener("error", () => {
+    setAssistantState("error");
+    const speakBtn = document.querySelector(".speak-again-button");
+    if (speakBtn) {
+      speakBtn.style.display = "";
+      speakBtn.disabled = false;
+      speakBtn.textContent = "Try again";
+    }
+  });
+
   await playAudioElement(audio, audioUrl, {
     ...(pendingManualAudioOptions || {}),
     spokenText: pendingManualAudioText,
