@@ -23,7 +23,10 @@
           aria-label="Search products"
         />
         <button class="icon-button" type="submit" aria-label="Search">
-          <span aria-hidden="true">Go</span>
+          <span aria-hidden="true">Search</span>
+        </button>
+        <button id="voice-demo-button" class="search-voice-button" type="button">
+          Talk to AI
         </button>
       </form>
 
@@ -42,9 +45,6 @@
           </div>
           <div class="catalog-actions">
             <p id="result-summary">Loading products...</p>
-            <button id="voice-demo-button" class="primary-button" type="button">
-              Try voice
-            </button>
             <button id="clear-button" class="secondary-button" type="button">
               Show all
             </button>
@@ -87,7 +87,7 @@
     </main>
 
     <aside class="assistant-orb ai-assistant idle" id="assistant-orb" aria-live="polite">
-      <button class="assistant-voice-button" id="assistant-voice-button" type="button" aria-label="Tap to speak">
+      <button class="assistant-voice-button" id="assistant-voice-button" type="button" aria-label="Talk to AI" data-label="Talk to AI">
         <div id="ai-orb" class="ai-orb idle" aria-hidden="true">
           <div class="orb-ring ring-one"></div>
           <div class="orb-ring ring-two"></div>
@@ -97,7 +97,7 @@
       </button>
       <div class="assistant-copy">
         <strong id="assistant-state">Ready</strong>
-        <span id="assistant-message">Tap to speak.</span>
+        <span id="assistant-message">Search, buy, or talk to AI.</span>
         <small id="assistant-status">Ready</small>
       </div>
     </aside>
@@ -112,14 +112,42 @@
           <div class="orb-core"></div>
         </div>
         <p class="stage-label" id="stage-label">Ready</p>
-        <h2 id="stage-message">Tap to speak and tell me what you are shopping for.</h2>
-        <p id="stage-transcript">I can search, compare, ask for your address, and open WhatsApp when you confirm the purchase.</p>
+        <h2 id="stage-message">Talk to AI when you want voice help.</h2>
+        <p id="stage-transcript">Buying never requires voice. Buy Now opens a written WhatsApp checkout.</p>
       </div>
     </section>
 
     <dialog class="product-dialog" id="product-dialog">
       <button class="dialog-close" id="dialog-close" type="button" aria-label="Close product">Close</button>
       <div id="product-detail"></div>
+    </dialog>
+
+    <dialog class="checkout-dialog" id="checkout-dialog">
+      <button class="dialog-close" id="checkout-close" type="button" aria-label="Close checkout">Close</button>
+      <form class="checkout-form" id="checkout-form">
+        <div>
+          <p class="eyebrow">WhatsApp checkout</p>
+          <h2>Complete your order</h2>
+          <p id="checkout-summary" class="checkout-summary"></p>
+        </div>
+
+        <label>
+          <span>Name</span>
+          <input id="checkout-name" name="customerName" type="text" autocomplete="name" required />
+        </label>
+
+        <label>
+          <span>Delivery address</span>
+          <input id="checkout-address" name="address" type="text" autocomplete="street-address" required />
+        </label>
+
+        <label>
+          <span>City</span>
+          <input id="checkout-city" name="city" type="text" autocomplete="address-level2" required />
+        </label>
+
+        <button class="primary-button" type="submit">Open WhatsApp</button>
+      </form>
     </dialog>
 
     <script src="app.js" type="module"></script>

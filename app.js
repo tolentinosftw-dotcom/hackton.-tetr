@@ -26,26 +26,33 @@ const stageTranscript = document.querySelector("#stage-transcript");
 const productDialog = document.querySelector("#product-dialog");
 const dialogClose = document.querySelector("#dialog-close");
 const productDetail = document.querySelector("#product-detail");
+const checkoutDialog = document.querySelector("#checkout-dialog");
+const checkoutClose = document.querySelector("#checkout-close");
+const checkoutForm = document.querySelector("#checkout-form");
+const checkoutSummary = document.querySelector("#checkout-summary");
+const checkoutNameInput = document.querySelector("#checkout-name");
+const checkoutAddressInput = document.querySelector("#checkout-address");
+const checkoutCityInput = document.querySelector("#checkout-city");
 const defaultChatPlaceholder = chatInput?.getAttribute("placeholder") || "Ask about your cart";
 
 const assistantStates = {
   idle: {
     label: "Ready",
-    button: "Tap to speak",
-    message: "Tap to speak.",
+    button: "Talk to AI",
+    message: "Search, buy, or talk to AI.",
   },
   listening: {
-    label: "Listening",
+    label: "Listening...",
     button: "Listening...",
     message: "Listening...",
   },
   thinking: {
-    label: "Thinking",
+    label: "Thinking...",
     button: "Thinking...",
     message: "Thinking...",
   },
   speaking: {
-    label: "Speaking",
+    label: "Speaking...",
     button: "Speaking...",
     message: "Speaking...",
   },
@@ -57,10 +64,10 @@ const assistantStates = {
 };
 
 const checkoutAwaitingLabels = {
-  name: "Tap to answer your name.",
-  address: "Tap to answer your address.",
-  city: "Tap to answer your city.",
-  confirmation: "Tap to confirm or change.",
+  name: "Answer by voice, or type your name in the chat.",
+  address: "Answer by voice, or type your delivery address.",
+  city: "Answer by voice, or type your city.",
+  confirmation: "Answer by voice, or type yes to confirm.",
 };
 
 const writtenCheckoutLabels = {
@@ -199,7 +206,7 @@ function setAssistantState(state = "idle", label = "") {
 
   assistantState.textContent = config.label;
   assistantMessage.textContent = message;
-  assistantStatus.textContent = message;
+  assistantStatus.textContent = config.label;
   stageLabel.textContent = config.label;
   stageMessage.textContent = message;
   if (assistantVoiceButton) {
@@ -224,7 +231,7 @@ function setAssistant(mode, message) {
 }
 
 function getCheckoutAwaitingMessage() {
-  return checkoutAwaitingLabels[checkoutState.awaiting] || "Tap to answer.";
+  return checkoutAwaitingLabels[checkoutState.awaiting] || "Answer by voice, or type in the chat.";
 }
 
 function getWrittenCheckoutMessage() {
@@ -402,6 +409,9 @@ function renderProducts(items) {
         <button class="add-button" type="button" data-product-id="${product.id}">
           Add to cart
         </button>
+        <button class="buy-button" type="button" data-buy-now="${product.id}">
+          Buy Now
+        </button>
         <button class="detail-button" type="button" data-detail-id="${product.id}">
           View product
         </button>
@@ -551,7 +561,7 @@ function showProductDetail(product) {
         <p>${product.description || product.name}</p>
         <p class="price">${money.format(product.price)}</p>
         <div class="product-detail-actions">
-          <button class="primary-button" type="button" data-buy-now="${product.id}">Buy this</button>
+          <button class="primary-button" type="button" data-buy-now="${product.id}">Buy Now</button>
           <button class="secondary-button" type="button" data-add-from-detail="${product.id}">Add to cart</button>
         </div>
       </div>
@@ -637,6 +647,35 @@ function summarizeCheckout(productsToBuy = getCheckoutProducts()) {
   return `${productLines}\nName: ${checkoutState.customerName || "-"}\nAddress: ${checkoutState.address || "-"}\nCity: ${checkoutState.city || "-"}`;
 }
 
+function getCheckoutDetailsSnapshot() {
+  return {
+    customerName: checkoutState.customerName || "",
+    address: checkoutState.address || "",
+    city: checkoutState.city || "",
+  };
+}
+
+function applyCheckoutDetails(details = {}) {
+  checkoutState.customerName = String(details.customerName || "").trim();
+  checkoutState.address = String(details.address || "").trim();
+  checkoutState.city = String(details.city || "").trim();
+}
+
+function hasCompleteCheckoutDetails(details = checkoutState) {
+  return Boolean(
+    String(details.customerName || "").trim() &&
+      String(details.address || "").trim() &&
+      String(details.city || "").trim()
+  );
+}
+
+function getNextMissingCheckoutField(details = checkoutState) {
+  if (!String(details.customerName || "").trim()) return "name";
+  if (!String(details.address || "").trim()) return "address";
+  if (!String(details.city || "").trim()) return "city";
+  return null;
+}
+
 function buildWhatsappMessage(productsToBuy, details) {
   const productLines =
     productsToBuy.length === 1
@@ -657,6 +696,90 @@ function buildCheckoutWhatsappUrl(productsToBuy = getCheckoutProducts()) {
   });
   const message = buildWhatsappMessage(productsToBuy, checkoutState);
   return `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+}
+
+function openCheckoutWhatsapp(productsToBuy = getCheckoutProducts(), language = "en") {
+  const checkoutProducts = productsToBuy.filter(Boolean);
+  if (!checkoutProducts.length) {
+    const message = "Choose a product first, then I can open WhatsApp checkout.";
+    addChatMessage("ai", message);
+    showAssistantText(message, "Ready");
+    return;
+  }
+
+  const whatsappUrl = buildCheckoutWhatsappUrl(checkoutProducts);
+  console.log("[checkout] whatsapp opened", {
+    productIds: checkoutProducts.map((product) => product.id),
+  });
+  logClient("checkout whatsapp opened", {
+    productIds: checkoutProducts.map((product) => product.id),
+  });
+  window.open(whatsappUrl, "_blank", "noopener");
+
+  const shouldSpeak = checkoutState.voiceEnabled;
+  const answer = phrase("openedWhatsapp", language);
+  remember("assistant", answer);
+  addChatMessage("ai", answer);
+  if (shouldSpeak) {
+    speakAndShow(answer).catch((error) => {
+      console.error("[error] checkout voice response failed", error);
+      showAssistantText(answer, "Ready");
+    }).finally(resetCheckout);
+  } else {
+    showAssistantText(answer, "Ready");
+    resetCheckout();
+  }
+}
+
+function openCheckoutForm(productsToBuy = getCheckoutProducts()) {
+  checkoutState.awaiting = getNextMissingCheckoutField();
+  checkoutState.readyToConfirm = false;
+  checkoutState.voiceEnabled = false;
+  if (chatInput && checkoutState.awaiting) chatInput.placeholder = getWrittenCheckoutMessage();
+
+  if (!checkoutDialog || !checkoutForm) {
+    const answer = "Type your name, delivery address, and city in the chat so I can open WhatsApp.";
+    addChatMessage("ai", answer);
+    showAssistantText(answer, "Ready");
+    focusCheckoutInput();
+    return;
+  }
+
+  checkoutSummary.textContent = summarizeCheckout(productsToBuy);
+  checkoutNameInput.value = checkoutState.customerName || "";
+  checkoutAddressInput.value = checkoutState.address || "";
+  checkoutCityInput.value = checkoutState.city || "";
+  if (!checkoutDialog.open) checkoutDialog.showModal();
+
+  const firstEmptyInput = [checkoutNameInput, checkoutAddressInput, checkoutCityInput].find((input) => !input.value.trim());
+  window.setTimeout(() => (firstEmptyInput || checkoutNameInput).focus(), 0);
+  showAssistantText("Complete the checkout form and I will open WhatsApp.", "Ready");
+}
+
+function startBuyNowCheckout(product, language = "en") {
+  if (!product) return;
+  console.log("[checkout] buy now clicked", { productId: product.id });
+  logClient("checkout buy now clicked", {
+    id: product.id,
+    name: product.name,
+    price: product.price,
+  });
+
+  const existingDetails = getCheckoutDetailsSnapshot();
+  resetCheckout();
+  applyCheckoutDetails(existingDetails);
+  setCheckoutProducts([product]);
+  checkoutState.voiceEnabled = false;
+  checkoutState.awaiting = null;
+  checkoutState.readyToConfirm = false;
+  currentRecommendation = product;
+
+  if (hasCompleteCheckoutDetails()) {
+    openCheckoutWhatsapp([product], language);
+    return;
+  }
+
+  openCheckoutForm([product]);
 }
 
 function addToCart(product) {
@@ -688,9 +811,9 @@ async function speakAndShow(text, options = {}) {
   await speak(spokenText);
 
   if (options.afterMode) {
-    setAssistant(options.afterMode, options.afterMessage || "Tap to speak and tell me what you are shopping for.");
+    setAssistant(options.afterMode, options.afterMessage || assistantStates.idle.message);
   } else {
-    setAssistant("idle", "Tap to speak and tell me what you are shopping for.");
+    setAssistant("idle", "Ready. Press Talk to AI if you want voice help again.");
   }
 }
 
@@ -899,6 +1022,7 @@ async function speak(text) {
 }
 
 async function startVoiceDemo() {
+  console.log("[voice] button clicked");
   logClient("voice start requested");
   console.log("[voice] listening requested");
   openAssistantStage("Listening...");
@@ -1264,14 +1388,8 @@ async function handleCommerceConversation(message, source = "manual") {
   if (checkoutState.awaiting === "confirmation" && checkoutState.readyToConfirm) {
     if (isCheckoutConfirmation(cleanMessage)) {
       const productsToBuy = getCheckoutProducts();
-      const whatsappUrl = buildCheckoutWhatsappUrl(productsToBuy);
-      const answer = phrase("openedWhatsapp", language);
       remember("user", cleanMessage);
-      remember("assistant", answer);
-      addChatMessage("ai", answer);
-      window.open(whatsappUrl, "_blank", "noopener");
-      await respondCheckoutMessage(answer, language);
-      resetCheckout();
+      openCheckoutWhatsapp(productsToBuy, language);
       return;
     }
 
@@ -1347,12 +1465,12 @@ async function loadProducts() {
     renderCategories();
     renderProducts(products);
     updateCartUi();
-    setAssistant("idle", "Tap to speak and tell me what you are shopping for.");
+    setAssistant("idle", assistantStates.idle.message);
   } catch (error) {
     logClientError("load products failed", error);
     resultSummary.textContent = "Catalog load error";
     productGrid.innerHTML = '<div class="empty-state">products.json could not be loaded.</div>';
-    setAssistant("speaking", "I could not load the catalog.");
+    setAssistant("error", "I could not load the catalog.");
   }
 }
 
@@ -1420,6 +1538,13 @@ chatForm.addEventListener("submit", async (event) => {
 });
 
 productGrid.addEventListener("click", (event) => {
+  const buyNowButton = event.target.closest("[data-buy-now]");
+  if (buyNowButton) {
+    const product = findProduct(buyNowButton.dataset.buyNow);
+    if (product) startBuyNowCheckout(product, "en");
+    return;
+  }
+
   const detailButton = event.target.closest("[data-detail-id]");
   if (detailButton) {
     logClient("product detail clicked", { id: detailButton.dataset.detailId });
@@ -1457,24 +1582,32 @@ productDetail.addEventListener("click", async (event) => {
   }
 
   if (buyButton) {
-    logClient("detail buy clicked", { id: buyButton.dataset.buyNow });
     const product = findProduct(buyButton.dataset.buyNow);
     if (!product) return;
-    resetCheckout();
-    currentRecommendation = product;
-    setCheckoutProducts([product]);
-    checkoutState.voiceEnabled = false;
-    const answer = phrase("askName", "en");
     productDialog.close();
-    remember("assistant", answer);
-    addChatMessage("ai", answer);
-    await promptCheckoutAnswer(answer, "name", "en");
+    startBuyNowCheckout(product, "en");
   }
 });
 
 dialogClose.addEventListener("click", () => {
   logClient("product dialog close clicked");
   productDialog.close();
+});
+checkoutClose?.addEventListener("click", () => {
+  logClient("checkout dialog close clicked");
+  checkoutDialog.close();
+});
+checkoutForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  applyCheckoutDetails({
+    customerName: checkoutNameInput.value,
+    address: checkoutAddressInput.value,
+    city: checkoutCityInput.value,
+  });
+
+  const productsToBuy = getCheckoutProducts();
+  checkoutDialog.close();
+  openCheckoutWhatsapp(productsToBuy, detectLanguage(checkoutState.customerName));
 });
 stageClose.addEventListener("click", closeAssistantStage);
 
