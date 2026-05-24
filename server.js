@@ -358,10 +358,11 @@ function readBody(request) {
 
 function serveStatic(request, response) {
   const url = new URL(request.url, `http://${request.headers.host}`);
+  const requestedPath = url.pathname === "/" ? "/index.html" : url.pathname;
   const safePath = path
-    .normalize(decodeURIComponent(url.pathname))
+    .normalize(decodeURIComponent(requestedPath))
     .replace(/^(\.\.[/\\])+/, "");
-  const filePath = path.join(root, safePath === "/" ? "index.html" : safePath);
+  const filePath = path.join(root, safePath);
 
   if (!filePath.startsWith(root) || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
     console.warn(`[server] static not found url=${request.url} path=${filePath}`);

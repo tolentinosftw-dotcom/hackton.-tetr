@@ -86,25 +86,33 @@
       </section>
     </main>
 
-    <aside class="assistant-orb" id="assistant-orb" tabindex="0" aria-live="polite" role="button">
-      <img id="assistant-image" src="4.png" alt="Genie assistant ready" />
-      <div>
+    <aside class="assistant-orb ai-assistant idle" id="assistant-orb" aria-live="polite">
+      <button class="assistant-voice-button" id="assistant-voice-button" type="button" aria-label="Tap to speak">
+        <div id="ai-orb" class="ai-orb idle" aria-hidden="true">
+          <div class="orb-ring ring-one"></div>
+          <div class="orb-ring ring-two"></div>
+          <div class="orb-ring ring-three"></div>
+          <div class="orb-core"></div>
+        </div>
+      </button>
+      <div class="assistant-copy">
         <strong id="assistant-state">Ready</strong>
-        <span id="assistant-message">Click the genie and ask for a product.</span>
+        <span id="assistant-message">Tap to speak.</span>
+        <small id="assistant-status">Ready</small>
       </div>
     </aside>
 
     <section class="assistant-stage" id="assistant-stage" aria-hidden="true">
       <button class="stage-close" id="stage-close" type="button" aria-label="Close assistant">Close</button>
       <div class="stage-core">
-        <div class="stage-genie-wrap">
-          <span class="voice-ring ring-one"></span>
-          <span class="voice-ring ring-two"></span>
-          <span class="voice-ring ring-three"></span>
-          <img id="stage-genie-image" src="4.png" alt="Genie assistant" />
+        <div id="stage-ai-orb" class="stage-ai-orb ai-orb idle" aria-hidden="true">
+          <div class="orb-ring ring-one"></div>
+          <div class="orb-ring ring-two"></div>
+          <div class="orb-ring ring-three"></div>
+          <div class="orb-core"></div>
         </div>
         <p class="stage-label" id="stage-label">Ready</p>
-        <h2 id="stage-message">Click the genie and tell me what you are shopping for.</h2>
+        <h2 id="stage-message">Tap to speak and tell me what you are shopping for.</h2>
         <p id="stage-transcript">I can search, compare, ask for your address, and open WhatsApp when you confirm the purchase.</p>
       </div>
     </section>

@@ -11,13 +11,15 @@ const chatForm = document.querySelector("#chat-form");
 const chatInput = document.querySelector("#chat-input");
 const chatMessages = document.querySelector("#chat-messages");
 const assistantOrb = document.querySelector("#assistant-orb");
-const assistantImage = document.querySelector("#assistant-image");
+const assistantVoiceButton = document.querySelector("#assistant-voice-button");
+const aiOrb = document.querySelector("#ai-orb");
 const assistantState = document.querySelector("#assistant-state");
 const assistantMessage = document.querySelector("#assistant-message");
+const assistantStatus = document.querySelector("#assistant-status");
 const elevenlabsWidget = document.querySelector("#elevenlabs-widget");
 const assistantStage = document.querySelector("#assistant-stage");
 const stageClose = document.querySelector("#stage-close");
-const stageGenieImage = document.querySelector("#stage-genie-image");
+const stageAiOrb = document.querySelector("#stage-ai-orb");
 const stageLabel = document.querySelector("#stage-label");
 const stageMessage = document.querySelector("#stage-message");
 const stageTranscript = document.querySelector("#stage-transcript");
@@ -25,26 +27,31 @@ const productDialog = document.querySelector("#product-dialog");
 const dialogClose = document.querySelector("#dialog-close");
 const productDetail = document.querySelector("#product-detail");
 
-const stateAssets = {
+const assistantStates = {
   idle: {
-    image: "4.png",
     label: "Ready",
-    alt: "Genie assistant ready",
+    button: "Tap to speak",
+    message: "Tap to speak.",
   },
   listening: {
-    image: "1.png",
     label: "Listening",
-    alt: "Assistant listening",
+    button: "Listening...",
+    message: "Listening...",
   },
   thinking: {
-    image: "2.png",
     label: "Thinking",
-    alt: "Assistant thinking",
+    button: "Thinking...",
+    message: "Thinking...",
   },
   speaking: {
-    image: "3.png",
-    label: "Responding",
-    alt: "Assistant responding",
+    label: "Speaking",
+    button: "Speaking...",
+    message: "Speaking...",
+  },
+  error: {
+    label: "Try again",
+    button: "Try again",
+    message: "I couldn't hear you. Try again.",
   },
 };
 
@@ -58,6 +65,8 @@ let checkoutState = createEmptyCheckout();
 let currentAudio = null;
 let currentAudioUrl = null;
 let lastSpokenText = "";
+let assistantStateTimeout = null;
+let currentAssistantState = "idle";
 
 const whatsappNumber = "573108853158";
 
@@ -148,17 +157,60 @@ function phrase(key, language = "en", details = {}) {
   return naturalCopy[key]?.[language] || naturalCopy[key]?.en || "";
 }
 
-function setAssistant(mode, message) {
-  logClient("assistant state", { mode, message });
-  const asset = stateAssets[mode] ?? stateAssets.idle;
-  assistantImage.src = asset.image;
-  assistantImage.alt = asset.alt;
-  assistantState.textContent = asset.label;
+function clearAssistantTimeout() {
+  if (!assistantStateTimeout) return;
+  window.clearTimeout(assistantStateTimeout);
+  assistantStateTimeout = null;
+}
+
+function setAssistantState(state = "idle", label = "") {
+  const nextState = assistantStates[state] ? state : "idle";
+  const config = assistantStates[nextState];
+  const message = label || config.message;
+
+  logClient("assistant state", { state: nextState, message });
+  clearAssistantTimeout();
+  currentAssistantState = nextState;
+
+  [assistantOrb, aiOrb, stageAiOrb].forEach((element) => {
+    if (!element) return;
+    element.classList.remove("idle", "listening", "thinking", "speaking", "error");
+    element.classList.add(nextState);
+  });
+
+  assistantState.textContent = config.label;
   assistantMessage.textContent = message;
-  stageGenieImage.src = asset.image;
-  stageGenieImage.alt = asset.alt;
-  stageLabel.textContent = asset.label;
+  assistantStatus.textContent = message;
+  stageLabel.textContent = config.label;
   stageMessage.textContent = message;
+  if (assistantVoiceButton) {
+    assistantVoiceButton.setAttribute("aria-label", config.button);
+    assistantVoiceButton.dataset.label = config.button;
+  }
+  if (voiceDemoButton) voiceDemoButton.textContent = config.button;
+
+  if (nextState === "thinking") {
+    assistantStateTimeout = window.setTimeout(() => {
+      const timeoutMessage = "This is taking longer than expected. Please try again.";
+      console.error("[error] assistant thinking timeout");
+      setAssistantState("error", timeoutMessage);
+      stageTranscript.textContent = timeoutMessage;
+      window.setTimeout(() => setAssistantState("idle"), 2600);
+    }, 12000);
+  }
+}
+
+function setAssistant(mode, message) {
+  setAssistantState(mode, message);
+}
+
+function withResponseTimeout(promise, label = "AI request") {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      window.setTimeout(() => reject(new Error(`${label} timed out after 12 seconds`)), 12000);
+    }),
+  ]);
 }
 
 function openAssistantStage(transcript = "") {
@@ -303,6 +355,7 @@ function renderCategories() {
 }
 
 async function getAiProductSearch(query) {
+  console.log("[ai] request started", { endpoint: "product-search", query });
   logClient("api product-search request", {
     query,
     history: conversationHistory.slice(-8).length,
@@ -329,11 +382,13 @@ async function getAiProductSearch(query) {
     throw new Error(`AI search failed with ${response.status}`);
   }
   const data = await response.json();
+  console.log("[ai] response received", { endpoint: "product-search", data });
   logClient("api product-search data", data);
   return data;
 }
 
 async function getAiShoppingReply(message) {
+  console.log("[ai] request started", { endpoint: "shop-chat", message });
   logClient("api shop-chat request", {
     message,
     cartItems: getCartSummary().items.length,
@@ -362,6 +417,7 @@ async function getAiShoppingReply(message) {
     throw new Error(`AI chat failed with ${response.status}`);
   }
   const data = await response.json();
+  console.log("[ai] response received", { endpoint: "shop-chat", data });
   logClient("api shop-chat data", data);
   return data;
 }
@@ -543,15 +599,15 @@ function getSpeechText(text) {
 async function speakAndShow(text, options = {}) {
   const spokenText = getSpeechText(options.spokenText || text);
   logClient("speak and show", { chars: spokenText.length, text, spokenText });
-  setAssistant("speaking", spokenText);
   stageTranscript.textContent = text;
   openAssistantStage(text);
+  setAssistantState("speaking", spokenText);
   await speak(spokenText);
 
   if (options.afterMode) {
-    setAssistant(options.afterMode, options.afterMessage || "Click the genie and tell me what you are shopping for.");
+    setAssistant(options.afterMode, options.afterMessage || "Tap to speak and tell me what you are shopping for.");
   } else {
-    setAssistant("idle", "Click the genie and tell me what you are shopping for.");
+    setAssistant("idle", "Tap to speak and tell me what you are shopping for.");
   }
 }
 
@@ -588,7 +644,7 @@ async function runSearch(query, source = "manual") {
 
   if (activeQuery) {
     try {
-      const aiAnswer = await getAiProductSearch(activeQuery);
+      const aiAnswer = await withResponseTimeout(getAiProductSearch(activeQuery), "Product search");
       answer = aiAnswer.message || answer;
       finalResults = aiAnswer.productIds?.length
         ? orderProductsByIds(products, aiAnswer.productIds).slice(0, 12)
@@ -619,22 +675,22 @@ async function runSearch(query, source = "manual") {
         answer = `${answer} ${phrase("selectedProduct", language)}`;
       }
     } catch (error) {
+      console.error("[error] ai product search failed", error);
+      setAssistantState("error", "This is taking longer than expected. Please try again.");
       logClientError("run search ai failed", error);
       answer = `${answer} I could not connect to the AI, so I used local search.`;
     }
   }
 
-  window.setTimeout(() => {
-    setAssistant(finalResults.length ? "speaking" : "idle", answer);
-    if (activeQuery) addChatMessage("ai", answer);
-    if (activeQuery) speakAndShow(answer);
-  }, 350);
-
-  window.setTimeout(() => {
-    if (!assistantStage.classList.contains("is-open")) {
-      setAssistant("idle", "Click the genie and tell me what you are shopping for.");
-    }
-  }, 3600);
+  if (activeQuery) {
+    addChatMessage("ai", answer);
+    speakAndShow(answer).catch((error) => {
+      console.error("[error] voice response failed", error);
+      setAssistantState("idle");
+    });
+  } else {
+    setAssistantState("idle");
+  }
 
   return {
     query: activeQuery,
@@ -670,10 +726,12 @@ function speakWithBrowser(text) {
 
 async function speak(text) {
   lastSpokenText = text;
+  console.log("[tts] request started", { chars: text.length });
   logClient("tts start", { chars: text.length, text });
   try {
     if ("speechSynthesis" in window) speechSynthesis.cancel();
     if (currentAudio) {
+      console.log("[tts] stopping previous audio");
       logClient("tts stopping current audio");
       currentAudio.pause();
       currentAudio = null;
@@ -701,6 +759,7 @@ async function speak(text) {
       throw new Error(`TTS failed with ${response.status}`);
     }
     const audioBlob = await response.blob();
+    console.log("[tts] audio received", { size: audioBlob.size, type: audioBlob.type });
     logClient("tts blob", {
       size: audioBlob.size,
       type: audioBlob.type,
@@ -714,6 +773,7 @@ async function speak(text) {
       audio.addEventListener(
         "ended",
         () => {
+          console.log("[tts] playback ended");
           logClient("tts audio ended");
           URL.revokeObjectURL(audioUrl);
           currentAudioUrl = null;
@@ -734,10 +794,12 @@ async function speak(text) {
         { once: true }
       );
       audio.play().then(() => {
+        console.log("[tts] playback started");
         logClient("tts audio playing");
       }).catch(reject);
     });
   } catch (error) {
+    console.error("[error] tts failed", error);
     if (currentAudioUrl) {
       URL.revokeObjectURL(currentAudioUrl);
       currentAudioUrl = null;
@@ -750,15 +812,8 @@ async function speak(text) {
 
 async function startVoiceDemo() {
   logClient("voice start requested");
-  openAssistantStage("Starting voice assistant...");
-  setAssistant("speaking", "Hi, what are you shopping for today?");
-
-  try {
-    await speak("Hi, what are you shopping for today?");
-  } catch (error) {
-    logClientError("voice greeting failed before recognition", error);
-  }
-
+  console.log("[voice] listening requested");
+  openAssistantStage("Listening...");
   beginVoiceRecognition();
 }
 
@@ -769,7 +824,7 @@ function beginVoiceRecognition() {
 
   if (!SpeechRecognition) {
     logClient("voice unsupported");
-    setAssistant("idle", "Your browser does not support speech recognition. Use the ElevenLabs widget.");
+    setAssistantState("error", "Microphone is not available in this browser.");
     return;
   }
 
@@ -779,6 +834,7 @@ function beginVoiceRecognition() {
   recognition.maxAlternatives = 1;
 
   recognition.addEventListener("start", () => {
+    console.log("[voice] listening started");
     logClient("voice recognition started");
     setAssistant("listening", "I am listening. What are you shopping for today?");
     stageTranscript.textContent = "Listening...";
@@ -786,21 +842,41 @@ function beginVoiceRecognition() {
 
   recognition.addEventListener("result", (event) => {
     const transcript = event.results[0][0].transcript;
+    console.log("[voice] transcript received", { transcript });
     logClient("voice recognition result", { transcript });
     stageTranscript.textContent = transcript;
+    setAssistantState("thinking", "Thinking...");
     handleCommerceConversation(transcript, "voice-demo");
   });
 
   recognition.addEventListener("error", (event) => {
+    console.error("[error] voice recognition error", event.error || event);
     logClientError("voice recognition error", event.error || event);
-    setAssistant("idle", "I could not hear clearly. Click the genie and try again.");
+    const message =
+      event.error === "not-allowed"
+        ? "Microphone permission is blocked. Please allow microphone access."
+        : "I didn't catch that. Please try again.";
+    setAssistantState("error", message);
+  });
+
+  recognition.addEventListener("nomatch", () => {
+    console.error("[error] voice recognition no match");
+    setAssistantState("error", "I didn't catch that. Please try again.");
+  });
+
+  recognition.addEventListener("end", () => {
+    console.log("[voice] listening ended");
+    if (currentAssistantState === "listening") {
+      setAssistantState("error", "I didn't catch that. Please try again.");
+    }
   });
 
   try {
     recognition.start();
   } catch (error) {
+    console.error("[error] voice recognition start failed", error);
     logClientError("voice recognition start failed", error);
-    setAssistant("idle", "I could not start the microphone. Check browser permissions and try again.");
+    setAssistantState("error", "I could not start the microphone. Check browser permissions and try again.");
   }
 }
 
@@ -1021,7 +1097,7 @@ async function loadProducts() {
     renderCategories();
     renderProducts(products);
     updateCartUi();
-    setAssistant("idle", "Click the genie and tell me what you are shopping for.");
+    setAssistant("idle", "Tap to speak and tell me what you are shopping for.");
   } catch (error) {
     logClientError("load products failed", error);
     resultSummary.textContent = "Catalog load error";
@@ -1044,12 +1120,7 @@ clearButton.addEventListener("click", () => {
 });
 
 voiceDemoButton.addEventListener("click", startVoiceDemo);
-assistantOrb.addEventListener("click", startVoiceDemo);
-assistantOrb.addEventListener("keydown", (event) => {
-  if (event.key !== "Enter" && event.key !== " ") return;
-  event.preventDefault();
-  startVoiceDemo();
-});
+assistantVoiceButton?.addEventListener("click", startVoiceDemo);
 
 chatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1074,7 +1145,7 @@ chatForm.addEventListener("submit", async (event) => {
 
   let answer = answerCartQuestion(question).message;
   try {
-    const aiAnswer = await getAiShoppingReply(question);
+    const aiAnswer = await withResponseTimeout(getAiShoppingReply(question), "Shopping chat");
     answer = aiAnswer.message || answer;
     const recommendedProducts = orderProductsByIds(products, aiAnswer.productIds || []).slice(0, 12);
     logClient("chat ai applied", {
@@ -1084,6 +1155,8 @@ chatForm.addEventListener("submit", async (event) => {
     });
     if (recommendedProducts.length) renderProducts(recommendedProducts);
   } catch (error) {
+    console.error("[error] ai chat failed", error);
+    setAssistantState("error", "This is taking longer than expected. Please try again.");
     logClientError("chat ai failed", error);
     answer = `${answer} I could not reach the shopping assistant, so I used cart basics.`;
   }
@@ -1092,10 +1165,11 @@ chatForm.addEventListener("submit", async (event) => {
   conversationHistory.push({ role: "assistant", content: answer });
   conversationHistory = conversationHistory.slice(-10);
 
-  window.setTimeout(() => {
-    addChatMessage("ai", answer);
-    speakAndShow(answer);
-  }, 300);
+  addChatMessage("ai", answer);
+  speakAndShow(answer).catch((error) => {
+    console.error("[error] chat voice response failed", error);
+    setAssistantState("idle");
+  });
 });
 
 productGrid.addEventListener("click", (event) => {
