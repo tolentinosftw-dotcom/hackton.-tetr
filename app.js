@@ -66,6 +66,18 @@ const money = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 0,
 });
 
+function logClient(step, data = null) {
+  if (data === null || typeof data === "undefined") {
+    console.log(`[client] ${step}`);
+    return;
+  }
+  console.log(`[client] ${step}`, data);
+}
+
+function logClientError(step, error) {
+  console.error(`[client] ${step}`, error);
+}
+
 function normalize(value) {
   return value
     .toLowerCase()
@@ -74,6 +86,7 @@ function normalize(value) {
 }
 
 function setAssistant(mode, message) {
+  logClient("assistant state", { mode, message });
   const asset = stateAssets[mode] ?? stateAssets.idle;
   assistantImage.src = asset.image;
   assistantImage.alt = asset.alt;
@@ -86,12 +99,14 @@ function setAssistant(mode, message) {
 }
 
 function openAssistantStage(transcript = "") {
+  logClient("assistant stage open", { transcript });
   assistantStage.classList.add("is-open");
   assistantStage.setAttribute("aria-hidden", "false");
   if (transcript) stageTranscript.textContent = transcript;
 }
 
 function closeAssistantStage() {
+  logClient("assistant stage close");
   assistantStage.classList.remove("is-open");
   assistantStage.setAttribute("aria-hidden", "true");
 }
@@ -225,6 +240,10 @@ function renderCategories() {
 }
 
 async function getAiProductSearch(query) {
+  logClient("api product-search request", {
+    query,
+    history: conversationHistory.slice(-8).length,
+  });
   const response = await fetch("/api/product-search", {
     method: "POST",
     headers: {
@@ -236,11 +255,27 @@ async function getAiProductSearch(query) {
     }),
   });
 
-  if (!response.ok) throw new Error("AI search failed");
-  return response.json();
+  logClient("api product-search response", {
+    status: response.status,
+    ok: response.ok,
+    contentType: response.headers.get("content-type"),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    logClient("api product-search error body", errorText);
+    throw new Error(`AI search failed with ${response.status}`);
+  }
+  const data = await response.json();
+  logClient("api product-search data", data);
+  return data;
 }
 
 async function getAiShoppingReply(message) {
+  logClient("api shop-chat request", {
+    message,
+    cartItems: getCartSummary().items.length,
+    history: conversationHistory.slice(-8).length,
+  });
   const response = await fetch("/api/shop-chat", {
     method: "POST",
     headers: {
@@ -253,8 +288,19 @@ async function getAiShoppingReply(message) {
     }),
   });
 
-  if (!response.ok) throw new Error("AI chat failed");
-  return response.json();
+  logClient("api shop-chat response", {
+    status: response.status,
+    ok: response.ok,
+    contentType: response.headers.get("content-type"),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    logClient("api shop-chat error body", errorText);
+    throw new Error(`AI chat failed with ${response.status}`);
+  }
+  const data = await response.json();
+  logClient("api shop-chat data", data);
+  return data;
 }
 
 function orderProductsByIds(items, ids = []) {
@@ -271,13 +317,17 @@ function findProduct(id) {
 }
 
 function highlightProduct(productId) {
+  logClient("highlight product", { productId });
   document
     .querySelectorAll(".product-card.is-recommended")
     .forEach((card) => card.classList.remove("is-recommended"));
 
   const button = document.querySelector(`[data-product-id="${productId}"]`);
   const card = button?.closest(".product-card");
-  if (!card) return;
+  if (!card) {
+    logClient("highlight product card not found", { productId });
+    return;
+  }
 
   card.classList.add("is-recommended");
   card.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -285,6 +335,11 @@ function highlightProduct(productId) {
 
 function showProductDetail(product) {
   if (!product) return;
+  logClient("show product detail", {
+    id: product.id,
+    name: product.name,
+    price: product.price,
+  });
 
   productDetail.innerHTML = `
     <div class="product-detail">
@@ -314,17 +369,29 @@ function isNo(value) {
 }
 
 function buildWhatsappUrl(product, address) {
+  logClient("build whatsapp url", {
+    productId: product?.id,
+    productName: product?.name,
+    price: product?.price,
+    address,
+  });
   const message = `El cliente quiere comprar ${product.name} por ${money.format(product.price)} y debe ser enviado a ${address}.`;
   return `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
 }
 
 function addToCart(product) {
+  logClient("add to cart", {
+    id: product.id,
+    name: product.name,
+    price: product.price,
+  });
   cart.push(product);
   updateCartUi();
   addChatMessage("ai", `${product.name} is now in your cart.`);
 }
 
 async function speakAndShow(text) {
+  logClient("speak and show", { chars: text.length, text });
   setAssistant("speaking", text);
   stageTranscript.textContent = text;
   openAssistantStage(text);
@@ -332,11 +399,16 @@ async function speakAndShow(text) {
 }
 
 async function runSearch(query, source = "manual") {
+  logClient("run search start", { query, source });
   activeQuery = query.trim();
   searchInput.value = activeQuery;
   setAssistant("thinking", activeQuery ? `Thinking about: ${activeQuery}` : "Showing the full catalog.");
 
   const results = getFilteredProducts();
+  logClient("local search results", {
+    count: results.length,
+    firstIds: results.slice(0, 5).map((product) => product.id),
+  });
   renderProducts(results);
   const idealProduct = results[0];
 
@@ -355,12 +427,20 @@ async function runSearch(query, source = "manual") {
       finalResults = aiAnswer.productIds?.length
         ? orderProductsByIds(products, aiAnswer.productIds).slice(0, 12)
         : results;
+      logClient("ai search applied", {
+        answer,
+        finalCount: finalResults.length,
+        productIds: aiAnswer.productIds || [],
+      });
       renderProducts(finalResults);
       remember("user", activeQuery);
       remember("assistant", answer);
 
       const recommendedId = aiAnswer.productIds?.[0] || finalResults[0]?.id;
       currentRecommendation = recommendedId ? findProduct(recommendedId) : finalResults[0] || null;
+      logClient("current recommendation", currentRecommendation
+        ? { id: currentRecommendation.id, name: currentRecommendation.name }
+        : null);
       if (currentRecommendation) {
         checkoutState = "confirming";
         highlightProduct(currentRecommendation.id);
@@ -368,6 +448,7 @@ async function runSearch(query, source = "manual") {
         answer = `${answer} Would you like to buy this product?`;
       }
     } catch (error) {
+      logClientError("run search ai failed", error);
       answer = `${answer} I could not connect to the AI, so I used local search.`;
     }
   }
@@ -400,6 +481,10 @@ async function runSearch(query, source = "manual") {
 }
 
 function speakWithBrowser(text) {
+  logClient("browser speech fallback", {
+    available: "speechSynthesis" in window,
+    chars: text.length,
+  });
   if (!("speechSynthesis" in window)) return;
   speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
@@ -409,8 +494,10 @@ function speakWithBrowser(text) {
 
 async function speak(text) {
   lastSpokenText = text;
+  logClient("tts start", { chars: text.length, text });
   try {
     if (currentAudio) {
+      logClient("tts stopping current audio");
       currentAudio.pause();
       currentAudio = null;
     }
@@ -422,23 +509,46 @@ async function speak(text) {
       body: JSON.stringify({ text }),
     });
 
-    if (!response.ok) throw new Error("TTS failed");
+    logClient("tts response", {
+      status: response.status,
+      ok: response.ok,
+      contentType: response.headers.get("content-type"),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      logClient("tts error body", errorText);
+      throw new Error(`TTS failed with ${response.status}`);
+    }
     const audioBlob = await response.blob();
+    logClient("tts blob", {
+      size: audioBlob.size,
+      type: audioBlob.type,
+    });
     const audioUrl = URL.createObjectURL(audioBlob);
     const audio = new Audio(audioUrl);
     currentAudio = audio;
-    audio.addEventListener("ended", () => URL.revokeObjectURL(audioUrl), { once: true });
+    audio.addEventListener("ended", () => {
+      logClient("tts audio ended");
+      URL.revokeObjectURL(audioUrl);
+    }, { once: true });
+    audio.addEventListener("error", () => {
+      logClientError("tts audio element error", audio.error);
+    });
     await audio.play();
+    logClient("tts audio playing");
   } catch (error) {
+    logClientError("tts failed, using browser fallback", error);
     speakWithBrowser(text);
   }
 }
 
 function startVoiceDemo() {
+  logClient("voice start requested");
   openAssistantStage("Listening...");
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   if (!SpeechRecognition) {
+    logClient("voice unsupported");
     setAssistant("idle", "Your browser does not support speech recognition. Use the ElevenLabs widget.");
     return;
   }
@@ -449,21 +559,29 @@ function startVoiceDemo() {
   recognition.maxAlternatives = 1;
 
   recognition.addEventListener("start", () => {
+    logClient("voice recognition started");
     setAssistant("listening", "I am listening. What are you shopping for today?");
     stageTranscript.textContent = "Listening...";
   });
 
   recognition.addEventListener("result", (event) => {
     const transcript = event.results[0][0].transcript;
+    logClient("voice recognition result", { transcript });
     stageTranscript.textContent = transcript;
     handleCommerceConversation(transcript, "voice-demo");
   });
 
-  recognition.addEventListener("error", () => {
+  recognition.addEventListener("error", (event) => {
+    logClientError("voice recognition error", event.error || event);
     setAssistant("idle", "I could not hear clearly. Click the genie and try again.");
   });
 
-  recognition.start();
+  try {
+    recognition.start();
+  } catch (error) {
+    logClientError("voice recognition start failed", error);
+    setAssistant("idle", "I could not start the microphone. Check browser permissions and try again.");
+  }
 }
 
 function addChatMessage(role, text) {
@@ -516,12 +634,22 @@ function answerCartQuestion(question = "") {
 async function handleCommerceConversation(message, source = "manual") {
   const cleanMessage = message.trim();
   if (!cleanMessage) return;
+  logClient("commerce conversation", {
+    message: cleanMessage,
+    source,
+    checkoutState,
+    currentRecommendation: currentRecommendation?.id || null,
+  });
 
   openAssistantStage(cleanMessage);
   if (source !== "chat") addChatMessage("user", cleanMessage);
 
   if (checkoutState === "awaiting-address" && currentRecommendation) {
     const address = cleanMessage;
+    logClient("checkout address received", {
+      productId: currentRecommendation.id,
+      address,
+    });
     const answer = `Perfect. I am opening WhatsApp with the order for ${currentRecommendation.name}.`;
     remember("user", address);
     remember("assistant", answer);
@@ -535,6 +663,7 @@ async function handleCommerceConversation(message, source = "manual") {
 
   if (checkoutState === "confirming" && currentRecommendation) {
     if (isYes(cleanMessage)) {
+      logClient("checkout confirmed yes", { productId: currentRecommendation.id });
       const answer = `Great. What address should we ship ${currentRecommendation.name} to?`;
       checkoutState = "awaiting-address";
       remember("user", cleanMessage);
@@ -545,6 +674,7 @@ async function handleCommerceConversation(message, source = "manual") {
     }
 
     if (isNo(cleanMessage)) {
+      logClient("checkout declined", { productId: currentRecommendation.id });
       const answer = "No problem. Tell me what you would like to compare or change.";
       checkoutState = "idle";
       remember("user", cleanMessage);
@@ -559,11 +689,17 @@ async function handleCommerceConversation(message, source = "manual") {
 }
 
 function registerElevenLabsTools() {
-  if (!elevenlabsWidget) return;
+  if (!elevenlabsWidget) {
+    logClient("elevenlabs widget not found");
+    return;
+  }
+  logClient("elevenlabs widget listener registered");
 
   elevenlabsWidget.addEventListener("elevenlabs-convai:call", (event) => {
+    logClient("elevenlabs convai call event", event.detail);
     event.detail.config.clientTools = {
       searchProducts: ({ query, category }) => {
+        logClient("elevenlabs tool searchProducts", { query, category });
         if (category && [...new Set(products.map((product) => product.category).filter(Boolean))].includes(category)) {
           activeCategory = category;
           renderCategories();
@@ -571,22 +707,43 @@ function registerElevenLabsTools() {
 
         return runSearch(query ?? "", "elevenlabs");
       },
-      showAllProducts: () => runSearch("", "elevenlabs"),
-      getCart: () => getCartSummary(),
-      askCart: ({ question }) => answerCartQuestion(question ?? ""),
+      showAllProducts: () => {
+        logClient("elevenlabs tool showAllProducts");
+        return runSearch("", "elevenlabs");
+      },
+      getCart: () => {
+        logClient("elevenlabs tool getCart");
+        return getCartSummary();
+      },
+      askCart: ({ question }) => {
+        logClient("elevenlabs tool askCart", { question });
+        return answerCartQuestion(question ?? "");
+      },
     };
   });
 }
 
 async function loadProducts() {
   try {
+    logClient("load products request");
     const response = await fetch("products.json");
+    logClient("load products response", {
+      status: response.status,
+      ok: response.ok,
+      contentType: response.headers.get("content-type"),
+    });
+    if (!response.ok) throw new Error(`products.json failed with ${response.status}`);
     products = await response.json();
+    logClient("load products ok", {
+      count: products.length,
+      firstIds: products.slice(0, 5).map((product) => product.id),
+    });
     renderCategories();
     renderProducts(products);
     updateCartUi();
     setAssistant("idle", "Click the genie and tell me what you are shopping for.");
   } catch (error) {
+    logClientError("load products failed", error);
     resultSummary.textContent = "Catalog load error";
     productGrid.innerHTML = '<div class="empty-state">products.json could not be loaded.</div>';
     setAssistant("speaking", "I could not load the catalog.");
@@ -595,10 +752,12 @@ async function loadProducts() {
 
 searchForm.addEventListener("submit", (event) => {
   event.preventDefault();
+  logClient("search form submit", { value: searchInput.value });
   handleCommerceConversation(searchInput.value);
 });
 
 clearButton.addEventListener("click", () => {
+  logClient("clear search clicked");
   activeCategory = "All";
   renderCategories();
   runSearch("");
@@ -616,6 +775,11 @@ chatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const question = chatInput.value.trim();
   if (!question) return;
+  logClient("chat submit", {
+    question,
+    checkoutState,
+    cartItems: cart.length,
+  });
 
   addChatMessage("user", question);
   chatInput.value = "";
@@ -633,8 +797,14 @@ chatForm.addEventListener("submit", async (event) => {
     const aiAnswer = await getAiShoppingReply(question);
     answer = aiAnswer.message || answer;
     const recommendedProducts = orderProductsByIds(products, aiAnswer.productIds || []).slice(0, 12);
+    logClient("chat ai applied", {
+      answer,
+      recommendedCount: recommendedProducts.length,
+      productIds: aiAnswer.productIds || [],
+    });
     if (recommendedProducts.length) renderProducts(recommendedProducts);
   } catch (error) {
+    logClientError("chat ai failed", error);
     answer = `${answer} I could not reach the shopping assistant, so I used cart basics.`;
   }
 
@@ -652,6 +822,7 @@ chatForm.addEventListener("submit", async (event) => {
 productGrid.addEventListener("click", (event) => {
   const detailButton = event.target.closest("[data-detail-id]");
   if (detailButton) {
+    logClient("product detail clicked", { id: detailButton.dataset.detailId });
     const product = findProduct(detailButton.dataset.detailId);
     if (product) {
       currentRecommendation = product;
@@ -663,6 +834,7 @@ productGrid.addEventListener("click", (event) => {
 
   const button = event.target.closest("[data-product-id]");
   if (!button) return;
+  logClient("product add clicked", { id: button.dataset.productId });
 
   const product = products.find((item) => item.id === button.dataset.productId);
   if (!product) return;
@@ -676,6 +848,7 @@ productDetail.addEventListener("click", async (event) => {
   const addButton = event.target.closest("[data-add-from-detail]");
 
   if (addButton) {
+    logClient("detail add clicked", { id: addButton.dataset.addFromDetail });
     const product = findProduct(addButton.dataset.addFromDetail);
     if (!product) return;
     addToCart(product);
@@ -683,6 +856,7 @@ productDetail.addEventListener("click", async (event) => {
   }
 
   if (buyButton) {
+    logClient("detail buy clicked", { id: buyButton.dataset.buyNow });
     const product = findProduct(buyButton.dataset.buyNow);
     if (!product) return;
     currentRecommendation = product;
@@ -694,7 +868,10 @@ productDetail.addEventListener("click", async (event) => {
   }
 });
 
-dialogClose.addEventListener("click", () => productDialog.close());
+dialogClose.addEventListener("click", () => {
+  logClient("product dialog close clicked");
+  productDialog.close();
+});
 stageClose.addEventListener("click", closeAssistantStage);
 
 registerElevenLabsTools();

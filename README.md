@@ -37,6 +37,16 @@ node server.js
 
 Open `http://localhost:5173`.
 
+## Debug Production
+
+If production says `not found` and the genie does not speak, the site is probably deployed as static files only. The OpenAI and ElevenLabs features need the Node server because the browser calls these backend routes:
+
+- `POST /api/product-search`
+- `POST /api/shop-chat`
+- `POST /api/tts`
+
+Open DevTools Console and look for `[client]` logs. Run `node server.js` and look for `[server]` logs in the terminal. A `404` on `/api/tts` means the production host is not running `server.js`, so ElevenLabs audio will not work there until the backend is deployed too.
+
 ## Voice Purchase Flow
 
 1. Click the genie.

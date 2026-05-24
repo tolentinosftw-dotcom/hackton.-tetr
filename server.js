@@ -113,7 +113,10 @@ function formatCop(value) {
 }
 
 async function askOpenAi(query, candidates, history = []) {
-  if (!openAiKey) return localAnswer(query, candidates);
+  if (!openAiKey) {
+    console.warn("[server] OpenAI key missing, using local product answer");
+    return localAnswer(query, candidates);
+  }
 
   const compactProducts = candidates.map((product) => ({
     id: product.id,
@@ -123,6 +126,9 @@ async function askOpenAi(query, candidates, history = []) {
     tags: product.tags,
   }));
 
+  console.log(
+    `[server] OpenAI product request model=${openAiModel} query="${query}" candidates=${compactProducts.length}`
+  );
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -160,7 +166,9 @@ async function askOpenAi(query, candidates, history = []) {
   });
 
   const data = await response.json();
+  console.log(`[server] OpenAI product response status=${response.status} ok=${response.ok}`);
   if (!response.ok) {
+    console.error("[server] OpenAI product error body", data);
     throw new Error(data.error?.message || "OpenAI request failed");
   }
 
@@ -173,6 +181,7 @@ async function askOpenAi(query, candidates, history = []) {
       .join("\n");
 
   const parsed = JSON.parse(outputText || "{}");
+  console.log("[server] OpenAI product parsed", parsed);
   return {
     message: parsed.message || localAnswer(query, candidates).message,
     productIds: Array.isArray(parsed.productIds) ? parsed.productIds : [],
@@ -185,6 +194,7 @@ async function askShoppingAssistant(message, cart = [], history = []) {
   const candidates = getCandidateProducts(query || message, 10);
 
   if (!openAiKey) {
+    console.warn("[server] OpenAI key missing, using local cart answer");
     return {
       message:
         cart.length > 0
@@ -195,6 +205,9 @@ async function askShoppingAssistant(message, cart = [], history = []) {
     };
   }
 
+  console.log(
+    `[server] OpenAI chat request model=${openAiModel} message="${message}" cart=${cart.length} candidates=${candidates.length}`
+  );
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -239,7 +252,9 @@ async function askShoppingAssistant(message, cart = [], history = []) {
   });
 
   const data = await response.json();
+  console.log(`[server] OpenAI chat response status=${response.status} ok=${response.ok}`);
   if (!response.ok) {
+    console.error("[server] OpenAI chat error body", data);
     throw new Error(data.error?.message || "OpenAI chat request failed");
   }
 
@@ -252,6 +267,7 @@ async function askShoppingAssistant(message, cart = [], history = []) {
       .join("\n");
 
   const parsed = JSON.parse(outputText || "{}");
+  console.log("[server] OpenAI chat parsed", parsed);
   return {
     message: parsed.message || "What are you shopping for today?",
     productIds: Array.isArray(parsed.productIds) ? parsed.productIds : [],
@@ -294,9 +310,13 @@ async function streamToBuffer(audio) {
 
 async function synthesizeSpeech(text) {
   if (!elevenLabsKey) {
+    console.error("[server] ElevenLabs key missing");
     throw new Error("Missing ELEVENLABS_API_KEY or elevenlabs in .env");
   }
 
+  console.log(
+    `[server] ElevenLabs convert start voice=${elevenLabsVoiceId} model=${elevenLabsModelId} format=${elevenLabsOutputFormat}`
+  );
   const { ElevenLabsClient } = await import("@elevenlabs/elevenlabs-js");
   const elevenlabs = new ElevenLabsClient({
     apiKey: elevenLabsKey,
@@ -308,6 +328,7 @@ async function synthesizeSpeech(text) {
     outputFormat: elevenLabsOutputFormat,
   });
 
+  console.log("[server] ElevenLabs convert returned audio response");
   return streamToBuffer(audio);
 }
 
@@ -343,6 +364,7 @@ function serveStatic(request, response) {
   const filePath = path.join(root, safePath === "/" ? "index.html" : safePath);
 
   if (!filePath.startsWith(root) || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    console.warn(`[server] static not found url=${request.url} path=${filePath}`);
     response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     response.end("Not found");
     return;
@@ -355,14 +377,18 @@ function serveStatic(request, response) {
 }
 
 const server = http.createServer(async (request, response) => {
+  console.log(`[server] ${request.method} ${request.url}`);
   try {
     if (request.method === "GET" && request.url.startsWith("/api/products/")) {
       const id = decodeURIComponent(request.url.replace("/api/products/", ""));
+      console.log(`[server] product detail request id=${id}`);
       const product = getProductById(id);
       if (!product) {
+        console.warn(`[server] product not found id=${id}`);
         sendJson(response, 404, { message: "Product not found" });
         return;
       }
+      console.log(`[server] product detail ok id=${id}`);
       sendJson(response, 200, product);
       return;
     }
@@ -371,14 +397,19 @@ const server = http.createServer(async (request, response) => {
       const body = JSON.parse(await readBody(request));
       const query = String(body.query || "").trim();
       const history = Array.isArray(body.history) ? body.history : [];
+      console.log(`[server] product-search query="${query}" history=${history.length}`);
       if (!query) {
         sendJson(response, 400, { message: "Query is required", productIds: [] });
         return;
       }
 
       const candidates = getCandidateProducts(query);
+      console.log(`[server] product-search candidates=${candidates.length}`);
       const answer = await askOpenAi(query, candidates, history);
       const fallback = localAnswer(query, candidates);
+      console.log(
+        `[server] product-search answer intent=${answer.intent || "none"} productIds=${(answer.productIds || []).join(",")}`
+      );
       sendJson(response, 200, {
         message: answer.message || fallback.message,
         productIds: answer.productIds.length ? answer.productIds : fallback.productIds,
@@ -390,12 +421,14 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "POST" && request.url === "/api/tts") {
       const body = JSON.parse(await readBody(request));
       const text = String(body.text || "").trim().slice(0, 900);
+      console.log(`[server] tts request chars=${text.length} voice=${elevenLabsVoiceId}`);
       if (!text) {
         sendJson(response, 400, { message: "Text is required" });
         return;
       }
 
       const audio = await synthesizeSpeech(text);
+      console.log(`[server] tts ok bytes=${audio.length}`);
       sendAudio(response, audio);
       return;
     }
@@ -405,18 +438,23 @@ const server = http.createServer(async (request, response) => {
       const message = String(body.message || "").trim();
       const cart = Array.isArray(body.cart) ? body.cart : [];
       const history = Array.isArray(body.history) ? body.history : [];
+      console.log(`[server] shop-chat message="${message}" cart=${cart.length} history=${history.length}`);
       if (!message) {
         sendJson(response, 400, { message: "Message is required", productIds: [] });
         return;
       }
 
       const answer = await askShoppingAssistant(message, cart, history);
+      console.log(
+        `[server] shop-chat answer intent=${answer.intent || "none"} productIds=${(answer.productIds || []).join(",")}`
+      );
       sendJson(response, 200, answer);
       return;
     }
 
     serveStatic(request, response);
   } catch (error) {
+    console.error(`[server] error on ${request.method} ${request.url}:`, error);
     sendJson(response, 500, {
       message: error.message,
       productIds: [],
@@ -424,6 +462,20 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
+server.on("error", (error) => {
+  console.error(`[server] failed to start on port ${port}`, error);
+  if (error.code === "EADDRINUSE") {
+    console.error(
+      `[server] port ${port} is already in use. Stop the other process or run with another port: $env:PORT=5174; node server.js`
+    );
+  }
+  process.exit(1);
+});
+
 server.listen(port, () => {
   console.log(`VozMarket running on http://localhost:${port}`);
+  console.log("[server] debug routes ready: POST /api/product-search, POST /api/shop-chat, POST /api/tts");
+  console.log("[server] OpenAI key loaded:", Boolean(openAiKey));
+  console.log("[server] ElevenLabs key loaded:", Boolean(elevenLabsKey));
+  console.log("[server] ElevenLabs voice:", elevenLabsVoiceId);
 });
