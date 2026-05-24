@@ -315,22 +315,59 @@ async function synthesizeSpeech(text) {
     throw new Error("Missing ELEVENLABS_API_KEY or elevenlabs in .env");
   }
 
+  let lastError = null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      console.log(
+        `[server] ElevenLabs SDK convert start attempt=${attempt} voice=${elevenLabsVoiceId} model=${elevenLabsModelId} format=${elevenLabsOutputFormat}`
+      );
+      const { ElevenLabsClient } = await import("@elevenlabs/elevenlabs-js");
+      const elevenlabs = new ElevenLabsClient({
+        apiKey: elevenLabsKey,
+      });
+
+      const audio = await elevenlabs.textToSpeech.convert(elevenLabsVoiceId, {
+        text,
+        modelId: elevenLabsModelId,
+        outputFormat: elevenLabsOutputFormat,
+      });
+
+      console.log("[server] ElevenLabs SDK convert returned audio response");
+      return streamToBuffer(audio);
+    } catch (error) {
+      lastError = error;
+      console.error(`[server] ElevenLabs SDK attempt ${attempt} failed`, error);
+    }
+  }
+
   console.log(
-    `[server] ElevenLabs convert start voice=${elevenLabsVoiceId} model=${elevenLabsModelId} format=${elevenLabsOutputFormat}`
+    `[server] ElevenLabs REST fallback start voice=${elevenLabsVoiceId} model=${elevenLabsModelId} format=${elevenLabsOutputFormat}`
   );
-  const { ElevenLabsClient } = await import("@elevenlabs/elevenlabs-js");
-  const elevenlabs = new ElevenLabsClient({
-    apiKey: elevenLabsKey,
-  });
+  const elevenLabsResponse = await fetch(
+    `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(elevenLabsVoiceId)}?output_format=${encodeURIComponent(elevenLabsOutputFormat)}`,
+    {
+      method: "POST",
+      headers: {
+        Accept: "audio/mpeg",
+        "Content-Type": "application/json",
+        "xi-api-key": elevenLabsKey,
+      },
+      body: JSON.stringify({
+        text,
+        model_id: elevenLabsModelId,
+      }),
+    }
+  );
 
-  const audio = await elevenlabs.textToSpeech.convert(elevenLabsVoiceId, {
-    text,
-    modelId: elevenLabsModelId,
-    outputFormat: elevenLabsOutputFormat,
-  });
+  if (!elevenLabsResponse.ok) {
+    const errorText = await elevenLabsResponse.text();
+    console.error("[server] ElevenLabs REST fallback failed", elevenLabsResponse.status, errorText);
+    throw new Error(errorText || lastError?.message || "ElevenLabs request failed");
+  }
 
-  console.log("[server] ElevenLabs convert returned audio response");
-  return streamToBuffer(audio);
+  const audio = Buffer.from(await elevenLabsResponse.arrayBuffer());
+  console.log(`[server] ElevenLabs REST fallback ok bytes=${audio.length}`);
+  return audio;
 }
 
 async function transcribeAudioBuffer(buffer, mimeType = "audio/webm") {
