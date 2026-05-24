@@ -43,8 +43,8 @@ const stateAssets = {
   },
   speaking: {
     image: "3.png",
-    label: "Answering",
-    alt: "Assistant answering",
+    label: "Responding",
+    alt: "Assistant responding",
   },
 };
 
@@ -54,8 +54,9 @@ let activeQuery = "";
 let cart = [];
 let conversationHistory = [];
 let currentRecommendation = null;
-let checkoutState = "idle";
+let checkoutState = createEmptyCheckout();
 let currentAudio = null;
+let currentAudioUrl = null;
 let lastSpokenText = "";
 
 const whatsappNumber = "573108853158";
@@ -83,6 +84,68 @@ function normalize(value) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
+}
+
+function createEmptyCheckout() {
+  return {
+    selectedProduct: null,
+    selectedProducts: [],
+    customerName: "",
+    address: "",
+    city: "",
+    awaiting: null,
+    readyToConfirm: false,
+  };
+}
+
+function detectLanguage(value = "") {
+  const normalizedValue = normalize(value);
+  if (/\b(hola|claro|si|quiero|comprar|direccion|ciudad|nombre|confirmar|correcto|envialo|ayuda|celular|telefono|gracias|carrito|pedido)\b/.test(normalizedValue)) {
+    return "es";
+  }
+  return "en";
+}
+
+function phrase(key, language = "en", details = {}) {
+  const naturalCopy = {
+    askName: {
+      en: "Sure, I can help with that. Before I send this to WhatsApp, can you tell me your name?",
+      es: "Claro, te ayudo con eso. Antes de enviarlo a WhatsApp, dime tu nombre.",
+    },
+    askAddress: {
+      en: "Great. What delivery address should we use?",
+      es: "Genial. Cual es la direccion de entrega?",
+    },
+    askCity: {
+      en: "Perfect. What city should we send it to?",
+      es: "Perfecto. A que ciudad debemos enviarlo?",
+    },
+    decline: {
+      en: "No problem. Tell me what you would like to compare or change.",
+      es: "Sin problema. Dime que quieres comparar o cambiar.",
+    },
+    confirm: {
+      en: `Perfect. Please confirm if everything is correct and I will open WhatsApp for you.${details.summary ? `\n\n${details.summary}` : ""}`,
+      es: `Perfecto. Confirmame si todo esta correcto y abro WhatsApp.${details.summary ? `\n\n${details.summary}` : ""}`,
+    },
+    openedWhatsapp: {
+      en: "Done. I am opening WhatsApp with your order now.",
+      es: "Listo. Estoy abriendo WhatsApp con tu pedido.",
+    },
+    needConfirmation: {
+      en: "Please confirm if everything is correct and I will open WhatsApp.",
+      es: "Confirmame si todo esta correcto y abro WhatsApp.",
+    },
+    selectedProduct: {
+      en: "Would you like to buy it?",
+      es: "Quieres comprarla?",
+    },
+    cartCheckout: {
+      en: "Sure, I can help check out the products in your cart. Before I send this to WhatsApp, can you tell me your name?",
+      es: "Claro, te ayudo a comprar los productos del carrito. Antes de enviarlo a WhatsApp, dime tu nombre.",
+    },
+  };
+  return naturalCopy[key]?.[language] || naturalCopy[key]?.en || "";
 }
 
 function setAssistant(mode, message) {
@@ -361,21 +424,99 @@ function showProductDetail(product) {
 }
 
 function isYes(value) {
+  const normalizedValue = normalize(value);
+  if (/\b(yes|yeah|yep|sure|ok|okay|confirm|confirmed|correct|buy|purchase|si|claro|dale|comprar|confirmar|confirmado|correcto|esta bien)\b/i.test(normalizedValue)) {
+    return true;
+  }
   return /\b(yes|yeah|yep|sure|ok|okay|buy|purchase|si|sí|claro|dale|comprar)\b/i.test(value);
 }
 
 function isNo(value) {
+  const normalizedValue = normalize(value);
+  if (/\b(no|not now|cancel|nope|later|despues|cancela|cancelar|luego|ahora no)\b/i.test(normalizedValue)) {
+    return true;
+  }
   return /\b(no|not now|cancel|nope|later|despues|después)\b/i.test(value);
 }
 
 function buildWhatsappUrl(product, address) {
-  logClient("build whatsapp url", {
-    productId: product?.id,
-    productName: product?.name,
-    price: product?.price,
-    address,
+  const productsToBuy = product ? [product] : getCheckoutProducts();
+  const details = {
+    ...checkoutState,
+    address: address || checkoutState.address,
+    customerName: checkoutState.customerName || "-",
+    city: checkoutState.city || "-",
+  };
+  const exactMessage = buildWhatsappMessage(productsToBuy, details);
+  return `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(exactMessage)}`;
+}
+
+function wantsCheckout(value) {
+  return /\b(buy|purchase|checkout|order|comprar|pagar|pedido|ordenar|whatsapp|carrito)\b/i.test(value);
+}
+
+function isCheckoutConfirmation(value) {
+  return isYes(value) || /\b(confirm|confirmed|correct|confirmar|confirmado|correcto|esta bien|está bien)\b/i.test(value);
+}
+
+function getCheckoutProducts() {
+  if (checkoutState.selectedProducts.length) return checkoutState.selectedProducts;
+  if (checkoutState.selectedProduct) return [checkoutState.selectedProduct];
+  if (currentRecommendation) return [currentRecommendation];
+  return [];
+}
+
+function setCheckoutProducts(items) {
+  const uniqueProducts = [...new Map(items.filter(Boolean).map((product) => [product.id, product])).values()];
+  checkoutState.selectedProducts = uniqueProducts;
+  checkoutState.selectedProduct = uniqueProducts[0] || null;
+  currentRecommendation = checkoutState.selectedProduct;
+  checkoutState.readyToConfirm = false;
+}
+
+function resetCheckout() {
+  checkoutState = createEmptyCheckout();
+}
+
+function isCheckoutActive() {
+  return Boolean(
+    checkoutState.awaiting ||
+      checkoutState.readyToConfirm ||
+      checkoutState.selectedProduct ||
+      checkoutState.selectedProducts.length
+  );
+}
+
+function summarizeCheckout(productsToBuy = getCheckoutProducts()) {
+  const productLines =
+    productsToBuy.length === 1
+      ? `Product: ${productsToBuy[0].name}\nPrice: ${money.format(productsToBuy[0].price)}`
+      : `Products:\n${productsToBuy
+          .map((product, index) => `${index + 1}. ${product.name} - ${money.format(product.price)}`)
+          .join("\n")}`;
+
+  return `${productLines}\nName: ${checkoutState.customerName || "-"}\nAddress: ${checkoutState.address || "-"}\nCity: ${checkoutState.city || "-"}`;
+}
+
+function buildWhatsappMessage(productsToBuy, details) {
+  const productLines =
+    productsToBuy.length === 1
+      ? `Producto: ${productsToBuy[0].name}\nPrecio: ${money.format(productsToBuy[0].price)}`
+      : `Productos:\n${productsToBuy
+          .map((product, index) => `${index + 1}. ${product.name} - ${money.format(product.price)}`)
+          .join("\n")}`;
+
+  return `Hola, quiero comprar:\n${productLines}\nDirección: ${details.address}\nCiudad: ${details.city}\nCliente: ${details.customerName}`;
+}
+
+function buildCheckoutWhatsappUrl(productsToBuy = getCheckoutProducts()) {
+  logClient("build checkout whatsapp url", {
+    productIds: productsToBuy.map((product) => product.id),
+    customerName: checkoutState.customerName,
+    address: checkoutState.address,
+    city: checkoutState.city,
   });
-  const message = `El cliente quiere comprar ${product.name} por ${money.format(product.price)} y debe ser enviado a ${address}.`;
+  const message = buildWhatsappMessage(productsToBuy, checkoutState);
   return `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
 }
 
@@ -390,17 +531,36 @@ function addToCart(product) {
   addChatMessage("ai", `${product.name} is now in your cart.`);
 }
 
-async function speakAndShow(text) {
-  logClient("speak and show", { chars: text.length, text });
-  setAssistant("speaking", text);
+function getSpeechText(text) {
+  const compact = String(text)
+    .replace(/\s+/g, " ")
+    .replace(/\n+/g, " ")
+    .trim();
+  const sentences = compact.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [compact];
+  return sentences.slice(0, 3).join(" ").slice(0, 320).trim();
+}
+
+async function speakAndShow(text, options = {}) {
+  const spokenText = getSpeechText(options.spokenText || text);
+  logClient("speak and show", { chars: spokenText.length, text, spokenText });
+  setAssistant("speaking", spokenText);
   stageTranscript.textContent = text;
   openAssistantStage(text);
-  await speak(text);
+  await speak(spokenText);
+
+  if (options.afterMode) {
+    setAssistant(options.afterMode, options.afterMessage || "Click the genie and tell me what you are shopping for.");
+  } else {
+    setAssistant("idle", "Click the genie and tell me what you are shopping for.");
+  }
 }
 
 async function runSearch(query, source = "manual") {
   logClient("run search start", { query, source });
   activeQuery = query.trim();
+  const language = detectLanguage(activeQuery);
+  resetCheckout();
+  currentRecommendation = null;
   searchInput.value = activeQuery;
   setAssistant("thinking", activeQuery ? `Thinking about: ${activeQuery}` : "Showing the full catalog.");
 
@@ -414,9 +574,15 @@ async function runSearch(query, source = "manual") {
 
   let answer = activeQuery
     ? idealProduct
-      ? `I found a good option: ${idealProduct.name}.`
-      : `I could not find products for "${activeQuery}".`
-    : "Here are all products.";
+      ? language === "es"
+        ? `Perfecto, encontré esta opción para ti: ${idealProduct.name}.`
+        : `Perfect, I found this option for you: ${idealProduct.name}.`
+      : language === "es"
+        ? `No encontré productos para "${activeQuery}".`
+        : `I could not find products for "${activeQuery}".`
+    : language === "es"
+      ? "Aquí tienes todos los productos."
+      : "Here are all products.";
 
   let finalResults = results;
 
@@ -436,16 +602,21 @@ async function runSearch(query, source = "manual") {
       remember("user", activeQuery);
       remember("assistant", answer);
 
-      const recommendedId = aiAnswer.productIds?.[0] || finalResults[0]?.id;
+      const aiProductIds = Array.isArray(aiAnswer.productIds) ? aiAnswer.productIds : [];
+      const canRecommendFromIntent = !["clarify", "greeting", "cart_help"].includes(aiAnswer.intent);
+      const recommendedId = aiProductIds[0] || (canRecommendFromIntent ? finalResults[0]?.id : null);
       currentRecommendation = recommendedId ? findProduct(recommendedId) : finalResults[0] || null;
+      if (!recommendedId) currentRecommendation = null;
       logClient("current recommendation", currentRecommendation
         ? { id: currentRecommendation.id, name: currentRecommendation.name }
         : null);
       if (currentRecommendation) {
-        checkoutState = "confirming";
+        setCheckoutProducts([currentRecommendation]);
+        checkoutState.awaiting = null;
+        checkoutState.readyToConfirm = false;
         highlightProduct(currentRecommendation.id);
         showProductDetail(currentRecommendation);
-        answer = `${answer} Would you like to buy this product?`;
+        answer = `${answer} ${phrase("selectedProduct", language)}`;
       }
     } catch (error) {
       logClientError("run search ai failed", error);
@@ -485,21 +656,31 @@ function speakWithBrowser(text) {
     available: "speechSynthesis" in window,
     chars: text.length,
   });
-  if (!("speechSynthesis" in window)) return;
-  speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = "en-US";
-  speechSynthesis.speak(utterance);
+  if (!("speechSynthesis" in window)) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = detectLanguage(text) === "es" ? "es-CO" : "en-US";
+    utterance.onend = resolve;
+    utterance.onerror = resolve;
+    speechSynthesis.speak(utterance);
+  });
 }
 
 async function speak(text) {
   lastSpokenText = text;
   logClient("tts start", { chars: text.length, text });
   try {
+    if ("speechSynthesis" in window) speechSynthesis.cancel();
     if (currentAudio) {
       logClient("tts stopping current audio");
       currentAudio.pause();
       currentAudio = null;
+    }
+    if (currentAudioUrl) {
+      URL.revokeObjectURL(currentAudioUrl);
+      currentAudioUrl = null;
     }
     const response = await fetch("/api/tts", {
       method: "POST",
@@ -527,18 +708,43 @@ async function speak(text) {
     const audioUrl = URL.createObjectURL(audioBlob);
     const audio = new Audio(audioUrl);
     currentAudio = audio;
-    audio.addEventListener("ended", () => {
-      logClient("tts audio ended");
-      URL.revokeObjectURL(audioUrl);
-    }, { once: true });
-    audio.addEventListener("error", () => {
-      logClientError("tts audio element error", audio.error);
+    currentAudioUrl = audioUrl;
+
+    await new Promise((resolve, reject) => {
+      audio.addEventListener(
+        "ended",
+        () => {
+          logClient("tts audio ended");
+          URL.revokeObjectURL(audioUrl);
+          currentAudioUrl = null;
+          currentAudio = null;
+          resolve();
+        },
+        { once: true }
+      );
+      audio.addEventListener(
+        "error",
+        () => {
+          logClientError("tts audio element error", audio.error);
+          URL.revokeObjectURL(audioUrl);
+          currentAudioUrl = null;
+          currentAudio = null;
+          reject(audio.error || new Error("Audio playback failed"));
+        },
+        { once: true }
+      );
+      audio.play().then(() => {
+        logClient("tts audio playing");
+      }).catch(reject);
     });
-    await audio.play();
-    logClient("tts audio playing");
   } catch (error) {
+    if (currentAudioUrl) {
+      URL.revokeObjectURL(currentAudioUrl);
+      currentAudioUrl = null;
+    }
+    currentAudio = null;
     logClientError("tts failed, using browser fallback", error);
-    speakWithBrowser(text);
+    await speakWithBrowser(text);
   }
 }
 
@@ -568,7 +774,7 @@ function beginVoiceRecognition() {
   }
 
   const recognition = new SpeechRecognition();
-  recognition.lang = "en-US";
+  recognition.lang = navigator.language?.toLowerCase().startsWith("es") ? "es-CO" : "en-US";
   recognition.interimResults = false;
   recognition.maxAlternatives = 1;
 
@@ -648,6 +854,7 @@ function answerCartQuestion(question = "") {
 async function handleCommerceConversation(message, source = "manual") {
   const cleanMessage = message.trim();
   if (!cleanMessage) return;
+  const language = detectLanguage(cleanMessage);
   logClient("commerce conversation", {
     message: cleanMessage,
     source,
@@ -658,28 +865,21 @@ async function handleCommerceConversation(message, source = "manual") {
   openAssistantStage(cleanMessage);
   if (source !== "chat") addChatMessage("user", cleanMessage);
 
-  if (checkoutState === "awaiting-address" && currentRecommendation) {
-    const address = cleanMessage;
-    logClient("checkout address received", {
-      productId: currentRecommendation.id,
-      address,
-    });
-    const answer = `Perfect. I am opening WhatsApp with the order for ${currentRecommendation.name}.`;
-    remember("user", address);
+  if (!checkoutState.selectedProducts.length && cart.length && wantsCheckout(cleanMessage)) {
+    setCheckoutProducts(cart);
+    checkoutState.awaiting = "name";
+    const answer = phrase("cartCheckout", language);
+    remember("user", cleanMessage);
     remember("assistant", answer);
     addChatMessage("ai", answer);
-    const whatsappUrl = buildWhatsappUrl(currentRecommendation, address);
-    window.open(whatsappUrl, "_blank", "noopener");
     await speakAndShow(answer);
-    checkoutState = "idle";
     return;
   }
 
-  if (checkoutState === "confirming" && currentRecommendation) {
-    if (isYes(cleanMessage)) {
-      logClient("checkout confirmed yes", { productId: currentRecommendation.id });
-      const answer = `Great. What address should we ship ${currentRecommendation.name} to?`;
-      checkoutState = "awaiting-address";
+  if (checkoutState.selectedProduct && !checkoutState.awaiting && !checkoutState.readyToConfirm) {
+    if (isYes(cleanMessage) || wantsCheckout(cleanMessage)) {
+      checkoutState.awaiting = "name";
+      const answer = phrase("askName", language);
       remember("user", cleanMessage);
       remember("assistant", answer);
       addChatMessage("ai", answer);
@@ -688,15 +888,81 @@ async function handleCommerceConversation(message, source = "manual") {
     }
 
     if (isNo(cleanMessage)) {
-      logClient("checkout declined", { productId: currentRecommendation.id });
-      const answer = "No problem. Tell me what you would like to compare or change.";
-      checkoutState = "idle";
+      logClient("checkout declined", { productId: checkoutState.selectedProduct.id });
+      resetCheckout();
+      const answer = phrase("decline", language);
       remember("user", cleanMessage);
       remember("assistant", answer);
       addChatMessage("ai", answer);
       await speakAndShow(answer);
       return;
     }
+  }
+
+  if (checkoutState.awaiting === "name") {
+    checkoutState.customerName = cleanMessage;
+    checkoutState.awaiting = "address";
+    const answer = phrase("askAddress", language);
+    remember("user", cleanMessage);
+    remember("assistant", answer);
+    addChatMessage("ai", answer);
+    await speakAndShow(answer);
+    return;
+  }
+
+  if (checkoutState.awaiting === "address") {
+    checkoutState.address = cleanMessage;
+    checkoutState.awaiting = "city";
+    const answer = phrase("askCity", language);
+    remember("user", cleanMessage);
+    remember("assistant", answer);
+    addChatMessage("ai", answer);
+    await speakAndShow(answer);
+    return;
+  }
+
+  if (checkoutState.awaiting === "city") {
+    checkoutState.city = cleanMessage;
+    checkoutState.awaiting = "confirmation";
+    checkoutState.readyToConfirm = true;
+    const answer = phrase("confirm", language, {
+      summary: summarizeCheckout(),
+    });
+    remember("user", cleanMessage);
+    remember("assistant", answer);
+    addChatMessage("ai", answer);
+    await speakAndShow(answer);
+    return;
+  }
+
+  if (checkoutState.awaiting === "confirmation" && checkoutState.readyToConfirm) {
+    if (isCheckoutConfirmation(cleanMessage)) {
+      const productsToBuy = getCheckoutProducts();
+      const whatsappUrl = buildCheckoutWhatsappUrl(productsToBuy);
+      const answer = phrase("openedWhatsapp", language);
+      remember("user", cleanMessage);
+      remember("assistant", answer);
+      addChatMessage("ai", answer);
+      window.open(whatsappUrl, "_blank", "noopener");
+      await speakAndShow(answer);
+      resetCheckout();
+      return;
+    }
+
+    if (isNo(cleanMessage)) {
+      resetCheckout();
+      const answer = phrase("decline", language);
+      remember("user", cleanMessage);
+      remember("assistant", answer);
+      addChatMessage("ai", answer);
+      await speakAndShow(answer);
+      return;
+    }
+
+    const answer = phrase("needConfirmation", language);
+    addChatMessage("ai", answer);
+    await speakAndShow(answer);
+    return;
   }
 
   await runSearch(cleanMessage, source);
@@ -798,7 +1064,7 @@ chatForm.addEventListener("submit", async (event) => {
   addChatMessage("user", question);
   chatInput.value = "";
 
-  if (checkoutState !== "idle") {
+  if (isCheckoutActive()) {
     await handleCommerceConversation(question, "chat");
     return;
   }
@@ -828,7 +1094,6 @@ chatForm.addEventListener("submit", async (event) => {
 
   window.setTimeout(() => {
     addChatMessage("ai", answer);
-    setAssistant("speaking", answer);
     speakAndShow(answer);
   }, 300);
 });
@@ -840,6 +1105,7 @@ productGrid.addEventListener("click", (event) => {
     const product = findProduct(detailButton.dataset.detailId);
     if (product) {
       currentRecommendation = product;
+      setCheckoutProducts([product]);
       highlightProduct(product.id);
       showProductDetail(product);
     }
@@ -874,10 +1140,12 @@ productDetail.addEventListener("click", async (event) => {
     const product = findProduct(buyButton.dataset.buyNow);
     if (!product) return;
     currentRecommendation = product;
-    checkoutState = "awaiting-address";
-    const answer = `Great choice. What address should we ship ${product.name} to?`;
+    setCheckoutProducts([product]);
+    checkoutState.awaiting = "name";
+    const answer = phrase("askName", "en");
     productDialog.close();
     remember("assistant", answer);
+    addChatMessage("ai", answer);
     await speakAndShow(answer);
   }
 });

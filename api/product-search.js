@@ -29,10 +29,16 @@ module.exports = async function handler(request, response) {
     console.log(`[vercel] product-search candidates=${candidates.length}`);
     const answer = await askOpenAi(query, candidates, history);
     const fallback = localAnswer(query, candidates);
+    const answerProductIds = Array.isArray(answer.productIds) ? answer.productIds : [];
+    const canUseFallbackProducts = !["clarify", "greeting"].includes(answer.intent);
 
     sendJson(response, 200, {
       message: answer.message || fallback.message,
-      productIds: answer.productIds.length ? answer.productIds : fallback.productIds,
+      productIds: answerProductIds.length
+        ? answerProductIds
+        : canUseFallbackProducts
+          ? fallback.productIds
+          : [],
       intent: answer.intent || "recommend",
     });
   } catch (error) {

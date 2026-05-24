@@ -141,7 +141,7 @@ async function askOpenAi(query, candidates, history = []) {
         {
           role: "system",
           content:
-            "You are a warm English-speaking voice shopping assistant for an e-commerce site. Your job is not only to search, but to guide the buying journey: greet the customer, ask what they are shopping for, clarify budget/features/use case when needed, recommend from the provided product JSON only, explain briefly, and suggest the next helpful step. Keep spoken replies natural and concise, usually 1-3 short sentences. Return only valid JSON.",
+            "You are a warm voice shopping assistant for an e-commerce site. Understand Spanish and English. Reply in the customer's language when possible, but keep the wording short and easy to speak with ElevenLabs. Sound conversational, not robotic: use simple phrases like 'Sure, I can help with that' or 'Perfect, I found this option for you.' Recommend only from the provided product JSON. Ask one useful clarifying question only when needed. Do not oversell, do not pressure the customer, and do not invent products. Keep replies to 1-3 short sentences. Return only valid JSON.",
         },
         {
           role: "user",
@@ -150,7 +150,7 @@ async function askOpenAi(query, candidates, history = []) {
             customer_request: query,
             products: compactProducts,
             expected_json_shape: {
-              message: "short spoken English answer for the customer",
+              message: "short conversational answer in Spanish or English, 1-3 speakable sentences",
               productIds: ["recommended product id first; can be empty if asking a clarifying question"],
               intent: "greeting | clarify | recommend | compare | cart_help | checkout_help",
             },
@@ -220,7 +220,7 @@ async function askShoppingAssistant(message, cart = [], history = []) {
         {
           role: "system",
           content:
-            "You are a friendly English-speaking personal shopping assistant. Help the user through the full purchase process: understand needs, ask clarifying questions, compare products, explain tradeoffs, help with cart decisions, and suggest next steps. Use only the provided product and cart data. Keep answers natural and concise for voice. Return only valid JSON.",
+            "You are a friendly personal shopping assistant for a voice-commerce site. Understand Spanish and English. Reply in the customer's language when possible. Help naturally: understand needs, compare products, explain tradeoffs, and guide next steps without overselling. The frontend collects checkout details, so do not ask for name, address, or city unless the user clearly wants to buy or checkout. Use only the provided product and cart data. Keep answers natural, concise, and TTS-friendly, usually 1-3 short sentences. Return only valid JSON.",
         },
         {
           role: "user",
@@ -236,7 +236,7 @@ async function askShoppingAssistant(message, cart = [], history = []) {
               tags: product.tags,
             })),
             expected_json_shape: {
-              message: "short spoken English answer",
+              message: "short conversational answer in Spanish or English, 1-3 speakable sentences",
               productIds: ["optional suggested product ids"],
               intent: "greeting | clarify | recommend | compare | cart_help | checkout_help",
             },
@@ -418,12 +418,18 @@ const server = http.createServer(async (request, response) => {
       console.log(`[server] product-search candidates=${candidates.length}`);
       const answer = await askOpenAi(query, candidates, history);
       const fallback = localAnswer(query, candidates);
+      const answerProductIds = Array.isArray(answer.productIds) ? answer.productIds : [];
+      const canUseFallbackProducts = !["clarify", "greeting"].includes(answer.intent);
       console.log(
         `[server] product-search answer intent=${answer.intent || "none"} productIds=${(answer.productIds || []).join(",")}`
       );
       sendJson(response, 200, {
         message: answer.message || fallback.message,
-        productIds: answer.productIds.length ? answer.productIds : fallback.productIds,
+        productIds: answerProductIds.length
+          ? answerProductIds
+          : canUseFallbackProducts
+            ? fallback.productIds
+            : [],
         intent: answer.intent || "recommend",
       });
       return;
