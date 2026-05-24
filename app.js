@@ -814,7 +814,24 @@ async function startVoiceDemo() {
   logClient("voice start requested");
   console.log("[voice] listening requested");
   openAssistantStage("Listening...");
+  setAssistantState("listening", "Starting microphone...");
   beginVoiceRecognition();
+}
+
+async function handleVoiceRecognitionFailure(message, spokenText = message) {
+  stageTranscript.textContent = message;
+  addChatMessage("ai", message);
+  setAssistantState("error", message);
+  try {
+    await speakAndShow(message, {
+      spokenText,
+      afterMode: "error",
+      afterMessage: message,
+    });
+  } catch (error) {
+    console.error("[error] voice failure message could not be spoken", error);
+    setAssistantState("error", message);
+  }
 }
 
 function beginVoiceRecognition() {
@@ -824,7 +841,10 @@ function beginVoiceRecognition() {
 
   if (!SpeechRecognition) {
     logClient("voice unsupported");
-    setAssistantState("error", "Microphone is not available in this browser.");
+    handleVoiceRecognitionFailure(
+      "Microphone is not available in this browser. Please type your request in the search or chat box.",
+      "Microphone is not available. Please type your request."
+    );
     return;
   }
 
@@ -855,19 +875,21 @@ function beginVoiceRecognition() {
     const message =
       event.error === "not-allowed"
         ? "Microphone permission is blocked. Please allow microphone access."
-        : "I didn't catch that. Please try again.";
-    setAssistantState("error", message);
+        : event.error === "network"
+          ? "Voice recognition had a network problem. Please try again or type your request."
+          : "I didn't catch that. Please try again.";
+    handleVoiceRecognitionFailure(message);
   });
 
   recognition.addEventListener("nomatch", () => {
     console.error("[error] voice recognition no match");
-    setAssistantState("error", "I didn't catch that. Please try again.");
+    handleVoiceRecognitionFailure("I didn't catch that. Please try again.");
   });
 
   recognition.addEventListener("end", () => {
     console.log("[voice] listening ended");
     if (currentAssistantState === "listening") {
-      setAssistantState("error", "I didn't catch that. Please try again.");
+      handleVoiceRecognitionFailure("I didn't catch that. Please try again.");
     }
   });
 
@@ -876,7 +898,10 @@ function beginVoiceRecognition() {
   } catch (error) {
     console.error("[error] voice recognition start failed", error);
     logClientError("voice recognition start failed", error);
-    setAssistantState("error", "I could not start the microphone. Check browser permissions and try again.");
+    handleVoiceRecognitionFailure(
+      "I could not start the microphone. Check browser permissions and try again.",
+      "I could not start the microphone. Check browser permissions."
+    );
   }
 }
 
